@@ -188,10 +188,12 @@ function renderTask(task) {
   const btns = el("div", { className: "btns" });
   const edit = el("button", { className: "btn small", textContent: "Modifier" });
   edit.addEventListener("click", () => openForm(task));
+  const duplicate = el("button", { className: "btn small", textContent: "Dupliquer" });
+  duplicate.addEventListener("click", () => openForm(task, true));
   if (done) {
     const restore = el("button", { className: "btn small", textContent: "Restaurer" });
     restore.addEventListener("click", () => setStatus(task.id, "A_FAIRE"));
-    btns.append(restore, edit);
+    btns.append(restore, edit, duplicate);
   } else {
     const status = el("select", { ariaLabel: "Statut" },
       el("option", { value: "A_FAIRE", textContent: STATUS_LABELS.A_FAIRE }),
@@ -200,7 +202,7 @@ function renderTask(task) {
     status.addEventListener("change", () => setStatus(task.id, status.value));
     const remove = el("button", { className: "btn small danger", textContent: "Supprimer" });
     remove.addEventListener("click", () => removeTask(task));
-    btns.append(status, edit, remove);
+    btns.append(status, edit, duplicate, remove);
   }
 
   return el("li", { className: `task${done ? " done" : ""}` }, checkbox, info, btns);
@@ -227,16 +229,17 @@ async function removeTask(task) {
 }
 
 /* ---------- Formulaire ---------- */
-function openForm(task = null) {
-  editingId = task ? task.id : null;
-  $("dialog-title").textContent = task ? "Modifier la tâche" : "Nouvelle tâche";
+// duplicate : préremplit le formulaire depuis `task` mais crée une nouvelle tâche (sans deadline).
+function openForm(task = null, duplicate = false) {
+  editingId = task && !duplicate ? task.id : null;
+  $("dialog-title").textContent = editingId ? "Modifier la tâche" : "Nouvelle tâche";
   $("form-error").textContent = "";
   $("t-cabCode").value = task?.cabCode ?? "";
   $("t-cabLink").value = task?.cabLink ?? "";
   $("t-siteUrl").value = task?.siteUrl ?? "";
   $("t-description").value = task?.description ?? "";
   $("t-urgency").value = task?.urgency ?? "MOYENNE";
-  $("t-deadline").value = task?.deadline ? task.deadline.slice(0, 10) : "";
+  $("t-deadline").value = task?.deadline && !duplicate ? task.deadline.slice(0, 10) : "";
   $("t-assignedTo").value = task?.assignedTo ?? "";
   $("task-dialog").showModal();
 }
