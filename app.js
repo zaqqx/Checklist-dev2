@@ -1,11 +1,13 @@
 const $ = (id) => document.getElementById(id);
 const URGENCY_LABELS = { BASSE: "Basse", MOYENNE: "Moyenne", HAUTE: "Haute", CRITIQUE: "Critique" };
 const STATUS_LABELS = { A_FAIRE: "À faire", EN_COURS: "En cours", TERMINE: "Terminé" };
+const URGENCY_ORDER = { CRITIQUE: 0, HAUTE: 1, MOYENNE: 2, BASSE: 3 };
 
 let editingId = null;
 let devs = [];
 let searchTimer;
 let tasksRequest = 0;
+let doneOpen = false;
 
 /* ---------- Utilitaires ---------- */
 function el(tag, props = {}, ...children) {
@@ -228,45 +230,127 @@ async function loadTasks() {
   if (request === tasksRequest) renderTasks(data);
 }
 
+// Critique > Haute > Moyenne > Basse, puis échéance la plus proche (sans échéance en dernier).
+function compareTasks(a, b) {
+  const byUrgency = URGENCY_ORDER[a.urgency] - URGENCY_ORDER[b.urgency];
+  if (byUrgency) return byUrgency;
+  if (!a.deadline || !b.deadline) return (a.deadline ? 0 : 1) - (b.deadline ? 0 : 1);
+  return a.deadline.localeCompare(b.deadline);
+}
+
+// Nombre de jours entre aujourd'hui (Paris) et le jour d'échéance : négatif = en retard.
+function daysUntil(deadline) {
+  return Math.round((Date.parse(deadline.slice(0, 10)) - Date.parse(todayInParis())) / 86400000);
+}
+
+function isOverdue(task) {
+  return task.status !== "TERMINE" && Boolean(task.deadline) && daysUntil(task.deadline) < 0;
+}
+
 function renderTasks(tasks) {
   $("count").textContent = `${tasks.length} résultat${tasks.length > 1 ? "s" : ""}`;
+
+  const overdue = [];
+  const todo = [];
+  const done = [];
+  tasks.forEach((task) => (task.status === "TERMINE" ? done : isOverdue(task) ? overdue : todo).push(task));
+  overdue.sort(compareTasks);
+  todo.sort(compareTasks);
+
+  renderRecap({
+    overdue: overdue.length,
+    critical: [...overdue, ...todo].filter((task) => task.urgency === "CRITIQUE").length,
+    todo: todo.length,
+    done: done.length,
+  });
+
   const list = $("tasks");
   list.replaceChildren();
   if (!tasks.length) {
-    list.append(el("li", { className: "muted", textContent: "Aucune tâche ne correspond aux filtres." }));
+    list.append(el("p", { className: "muted empty", textContent: "Aucune tâche ne correspond aux filtres." }));
     return;
   }
-  tasks.forEach((task) => list.append(renderTask(task)));
+
+  // Avec un filtre de statut, seule la section correspondante est affichée.
+  const status = $("f-status").value;
+  if (status !== "TERMINE") {
+    if (overdue.length) list.append(taskSection("overdue", "En retard", overdue));
+    if (todo.length) list.append(taskSection("todo", "À traiter", todo));
+  }
+  if ((!status || status === "TERMINE") && done.length) {
+    const details = el("details", { id: "section-done", className: "task-section done", open: status === "TERMINE" || doneOpen },
+      el("summary", { className: "section-title", textContent: `Terminées (${done.length})` }),
+      el("ul", { className: "tasks" }, ...done.map((task) => renderTask(task))));
+    details.addEventListener("toggle", () => {
+      if ($("f-status").value !== "TERMINE") doneOpen = details.open;
+    });
+    list.append(details);
+  }
+}
+
+function taskSection(id, title, tasks) {
+  return el("section", { id: `section-${id}`, className: `task-section ${id}` },
+    el("h2", { className: "section-title", textContent: `${title} (${tasks.length})` }),
+    el("ul", { className: "tasks" }, ...tasks.map((task) => renderTask(task))));
+}
+
+function renderDue(deadline) {
+  const days = daysUntil(deadline);
+  let text = `Dans ${days} j`;
+  if (days < 0) text = `En retard de ${-days} j`;
+  else if (days === 0) text = "Aujourd'hui";
+  else if (days === 1) text = "Demain";
+  // Deadline stockée à minuit UTC : affichée en UTC pour garder le bon jour.
+  const full = new Date(deadline).toLocaleDateString("fr-FR", {
+    weekday: "long", day: "numeric", month: "long", year: "numeric", timeZone: "UTC",
+  });
+  return el("span", { className: `due${days < 0 ? " late" : days === 0 ? " today" : ""}`, textContent: text, title: full });
+}
+
+function renderAssignee(name) {
+  if (!name) return el("span", { className: "assignee none", textContent: "Non assigné" });
+  const initials = name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]).join("").toUpperCase();
+  return el("span", { className: "assignee", title: name },
+    el("span", { className: "avatar", textContent: initials, ariaHidden: "true" }), name);
 }
 
 function renderTask(task) {
   const done = task.status === "TERMINE";
-  const overdue = !done && task.deadline && task.deadline.slice(0, 10) < todayInParis();
+  const overdue = isOverdue(task);
 
-  const checkbox = el("input", { type: "checkbox", checked: done, disabled: done });
+  const checkbox = el("input", { type: "checkbox", checked: done, disabled: done, ariaLabel: "Marquer comme terminée" });
   checkbox.addEventListener("change", () => setStatus(task.id, "TERMINE"));
 
-  const info = el("div", { className: "info" });
+  // Ligne 1 : code CAB + site, pastilles à droite.
+  const line1 = el("div", { className: "line1" });
   const cabHref = task.cabLink && safeUrl(task.cabLink);
   if (task.cabCode) {
-    info.append(cabHref
-      ? el("a", { href: cabHref, target: "_blank", rel: "noopener noreferrer", textContent: task.cabCode })
-      : el("strong", { textContent: task.cabCode }));
+    line1.append(cabHref
+      ? el("a", { className: "cab", href: cabHref, target: "_blank", rel: "noopener noreferrer", textContent: task.cabCode })
+      : el("strong", { className: "cab", textContent: task.cabCode }));
   }
   const siteHref = task.siteUrl && safeUrl(task.siteUrl);
   if (siteHref) {
-    info.append(el("a", { href: siteHref, target: "_blank", rel: "noopener noreferrer", textContent: task.siteName || siteHref }));
+    line1.append(el("a", { className: "site", href: siteHref, target: "_blank", rel: "noopener noreferrer", textContent: task.siteName || siteHref }));
   }
-  if (task.description) info.append(el("small", { textContent: task.description }));
-  info.append(el("span", { className: `badge ${task.urgency}`, textContent: URGENCY_LABELS[task.urgency] }));
-  if (task.status === "EN_COURS") info.append(el("span", { className: "badge EN_COURS", textContent: STATUS_LABELS.EN_COURS }));
-  if (task.deadline) {
-    info.append(el("small", {
-      className: overdue ? "late" : "",
-      textContent: `${overdue ? "⚠ " : ""}${new Date(task.deadline).toLocaleDateString("fr-FR")}`,
-    }));
+  if (!task.cabCode && !siteHref) line1.append(el("span", { className: "cab untitled", textContent: "Sans code" }));
+  if (done && task.description) line1.append(el("span", { className: "desc-inline", textContent: task.description, title: task.description }));
+
+  const tags = el("span", { className: "tags" });
+  if (done) {
+    tags.append(el("span", { className: "badge check", textContent: `✓ ${STATUS_LABELS.TERMINE}` }));
+  } else {
+    if (task.status === "EN_COURS") tags.append(el("span", { className: "badge EN_COURS", textContent: STATUS_LABELS.EN_COURS }));
+    tags.append(el("span", { className: `badge ${task.urgency}`, textContent: URGENCY_LABELS[task.urgency] }));
   }
-  if (task.assignedTo) info.append(el("small", { textContent: `→ ${task.assignedTo}` }));
+  line1.append(tags);
+
+  // Ligne 2 : description (2 lignes max), échéance, assigné.
+  const body = el("div", { className: "body" }, line1);
+  if (!done) {
+    if (task.description) body.append(el("p", { className: "desc", textContent: task.description, title: task.description }));
+    body.append(el("div", { className: "meta" }, task.deadline && renderDue(task.deadline), renderAssignee(task.assignedTo)));
+  }
 
   const btns = el("div", { className: "btns" });
   const edit = el("button", { className: "btn small", textContent: "Modifier" });
@@ -288,7 +372,7 @@ function renderTask(task) {
     btns.append(status, edit, duplicate, remove);
   }
 
-  return el("li", { className: `task${done ? " done" : ""}` }, checkbox, info, btns);
+  return el("li", { className: `task urg-${task.urgency}${done ? " done" : ""}${overdue ? " overdue" : ""}` }, checkbox, body, btns);
 }
 
 async function setStatus(id, status) {
@@ -372,6 +456,38 @@ $("task-form").addEventListener("submit", async (event) => {
   $("task-dialog").close();
   loadTasks();
 });
+
+/* ---------- Récapitulatif ---------- */
+function renderRecap(counts) {
+  Object.entries(counts).forEach(([key, value]) => ($(`stat-${key}`).textContent = value));
+  document.querySelector('.stat[data-stat="overdue"]').ariaPressed = String($("f-due").value === "overdue");
+  document.querySelector('.stat[data-stat="critical"]').ariaPressed = String($("f-urgency").value === "CRITIQUE");
+  document.querySelector('.stat[data-stat="done"]').ariaPressed = String($("f-status").value === "TERMINE");
+}
+
+// Chaque compteur pilote les filtres existants ; un second clic retire le filtre.
+// « À traiter » n'a pas de filtre dédié : on retire ce qui masque la section puis on y défile.
+async function applyStat(stat) {
+  if (stat === "overdue") {
+    const on = $("f-due").value !== "overdue";
+    $("f-due").value = on ? "overdue" : "";
+    if (on && $("f-status").value === "TERMINE") $("f-status").value = "";
+  } else if (stat === "critical") {
+    $("f-urgency").value = $("f-urgency").value === "CRITIQUE" ? "" : "CRITIQUE";
+  } else if (stat === "done") {
+    const on = $("f-status").value !== "TERMINE";
+    $("f-status").value = on ? "TERMINE" : "";
+    if (on && $("f-due").value === "overdue") $("f-due").value = "";
+  } else if (stat === "todo") {
+    if ($("f-status").value === "TERMINE") $("f-status").value = "";
+    if ($("f-due").value === "overdue") $("f-due").value = "";
+  }
+  await loadTasks();
+  if (stat === "todo") $("section-todo")?.scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+document.querySelectorAll(".recap .stat").forEach((button) =>
+  button.addEventListener("click", () => applyStat(button.dataset.stat)));
 
 /* ---------- Filtres ---------- */
 ["f-status", "f-assigned", "f-urgency", "f-due"].forEach((id) => $(id).addEventListener("change", loadTasks));

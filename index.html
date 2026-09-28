@@ -31,6 +31,13 @@
       </div>
     </header>
 
+    <section class="recap" aria-label="Récapitulatif">
+      <button type="button" class="stat overdue" data-stat="overdue"><strong id="stat-overdue">0</strong><span>En retard</span></button>
+      <button type="button" class="stat critical" data-stat="critical"><strong id="stat-critical">0</strong><span>Critiques</span></button>
+      <button type="button" class="stat todo" data-stat="todo"><strong id="stat-todo">0</strong><span>À traiter</span></button>
+      <button type="button" class="stat done" data-stat="done"><strong id="stat-done">0</strong><span>Terminées</span></button>
+    </section>
+
     <section class="card filters">
       <input type="search" id="f-search" placeholder="Rechercher…">
       <select id="f-status">
@@ -59,7 +66,7 @@
     </section>
 
     <p class="error" id="list-error"></p>
-    <ul id="tasks" class="tasks"></ul>
+    <div id="tasks" class="sections"></div>
   </div>
 
   <!-- Formulaire tâche -->
