@@ -118,6 +118,13 @@ $("add-dev").addEventListener("click", async () => {
   $("t-assignedTo").value = name;
 });
 
+// Entrée dans « Nouveau dev » ajoute le dev au lieu d'enregistrer la tâche.
+$("new-dev").addEventListener("keydown", (event) => {
+  if (event.key !== "Enter") return;
+  event.preventDefault();
+  $("add-dev").click();
+});
+
 /* ---------- Liste ---------- */
 async function loadTasks() {
   $("list-error").textContent = "";
