@@ -1,5 +1,5 @@
 -- À exécuter dans Supabase → SQL Editor.
--- Si les tables existent déjà (ancien projet), seule la section "POLICIES" est nécessaire.
+-- Si les tables existent déjà (ancien projet), seules les sections "TRIGGERS" et "POLICIES" sont nécessaires.
 
 do $$ begin
   create type "Urgency" as enum ('BASSE', 'MOYENNE', 'HAUTE', 'CRITIQUE');
@@ -29,6 +29,19 @@ create table if not exists "Dev" (
   name text not null unique,
   "createdAt" timestamptz not null default now()
 );
+
+-- TRIGGERS : met à jour "updatedAt" à chaque modification d'une tâche
+create or replace function set_updated_at() returns trigger
+language plpgsql as $$
+begin
+  new."updatedAt" = now();
+  return new;
+end $$;
+
+drop trigger if exists "task_set_updated_at" on "Task";
+create trigger "task_set_updated_at"
+  before update on "Task"
+  for each row execute function set_updated_at();
 
 alter table "Task" enable row level security;
 alter table "Dev" enable row level security;
