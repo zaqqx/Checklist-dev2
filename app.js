@@ -1,5 +1,6 @@
 const $ = (id) => document.getElementById(id);
 const URGENCY_LABELS = { BASSE: "Basse", MOYENNE: "Moyenne", HAUTE: "Haute", CRITIQUE: "Critique" };
+const STATUS_LABELS = { A_FAIRE: "À faire", EN_COURS: "En cours", TERMINE: "Terminé" };
 
 let editingId = null;
 let searchTimer;
@@ -169,6 +170,7 @@ function renderTask(task) {
   }
   if (task.description) info.append(el("small", { textContent: task.description }));
   info.append(el("span", { className: `badge ${task.urgency}`, textContent: URGENCY_LABELS[task.urgency] }));
+  if (task.status === "EN_COURS") info.append(el("span", { className: "badge EN_COURS", textContent: STATUS_LABELS.EN_COURS }));
   if (task.deadline) {
     info.append(el("small", {
       className: overdue ? "late" : "",
@@ -183,11 +185,16 @@ function renderTask(task) {
     restore.addEventListener("click", () => setStatus(task.id, "A_FAIRE"));
     btns.append(restore);
   } else {
+    const status = el("select", { ariaLabel: "Statut" },
+      el("option", { value: "A_FAIRE", textContent: STATUS_LABELS.A_FAIRE }),
+      el("option", { value: "EN_COURS", textContent: STATUS_LABELS.EN_COURS }));
+    status.value = task.status;
+    status.addEventListener("change", () => setStatus(task.id, status.value));
     const edit = el("button", { className: "btn small", textContent: "Modifier" });
     edit.addEventListener("click", () => openForm(task));
     const remove = el("button", { className: "btn small danger", textContent: "Supprimer" });
     remove.addEventListener("click", () => removeTask(task));
-    btns.append(edit, remove);
+    btns.append(status, edit, remove);
   }
 
   return el("li", { className: `task${done ? " done" : ""}` }, checkbox, info, btns);
