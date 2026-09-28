@@ -222,7 +222,11 @@ async function setStatus(id, status) {
   try {
     await api(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
   } catch (error) {
+    // Recharge d'abord (remet la carte dans son vrai état), puis affiche l'erreur
+    // que loadTasks() aurait sinon effacée.
+    await loadTasks();
     $("list-error").textContent = error.message;
+    return;
   }
   loadTasks();
 }
