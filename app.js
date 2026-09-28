@@ -186,18 +186,18 @@ function renderTask(task) {
   if (task.assignedTo) info.append(el("small", { textContent: `→ ${task.assignedTo}` }));
 
   const btns = el("div", { className: "btns" });
+  const edit = el("button", { className: "btn small", textContent: "Modifier" });
+  edit.addEventListener("click", () => openForm(task));
   if (done) {
     const restore = el("button", { className: "btn small", textContent: "Restaurer" });
     restore.addEventListener("click", () => setStatus(task.id, "A_FAIRE"));
-    btns.append(restore);
+    btns.append(restore, edit);
   } else {
     const status = el("select", { ariaLabel: "Statut" },
       el("option", { value: "A_FAIRE", textContent: STATUS_LABELS.A_FAIRE }),
       el("option", { value: "EN_COURS", textContent: STATUS_LABELS.EN_COURS }));
     status.value = task.status;
     status.addEventListener("change", () => setStatus(task.id, status.value));
-    const edit = el("button", { className: "btn small", textContent: "Modifier" });
-    edit.addEventListener("click", () => openForm(task));
     const remove = el("button", { className: "btn small danger", textContent: "Supprimer" });
     remove.addEventListener("click", () => removeTask(task));
     btns.append(status, edit, remove);
