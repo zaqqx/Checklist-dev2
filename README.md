@@ -3,7 +3,7 @@
 Site statique + Supabase. Node.js 20.12+ est nécessaire pour générer la configuration cliente.
 
 ## Structure
-
+.
 | Fichier | Rôle |
 |---|---|
 | `index.html` | Pages (connexion, liste, formulaire) |
