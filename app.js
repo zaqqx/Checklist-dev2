@@ -194,7 +194,6 @@ function renderTask(task) {
 }
 
 async function setStatus(id, status) {
-  const { error } = await db.from("Task").update({ status }).eq("id", id);
   try {
     await api(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
   } catch (error) {
@@ -209,7 +208,9 @@ async function removeTask(task) {
     await api(`/api/tasks/${task.id}`, { method: "DELETE" });
   } catch (error) {
     $("list-error").textContent = error.message;
+    return;
   }
+  loadTasks();
 }
 
 /* ---------- Formulaire ---------- */
@@ -239,7 +240,13 @@ $("task-form").addEventListener("submit", async (event) => {
     $("form-error").textContent = "Lien invalide (http:// ou https:// requis)";
     return;
   }
-description: $("t-description").value.trim() || null,
+
+  const deadline = $("t-deadline").value;
+  const payload = {
+    cabCode: $("t-cabCode").value.trim() || null,
+    cabLink: cabLink || null,
+    siteUrl: siteUrl || null,
+    description: $("t-description").value.trim() || null,
     urgency: $("t-urgency").value,
     deadline: deadline ? new Date(deadline).toISOString() : null,
     assignedTo: $("t-assignedTo").value || null,
@@ -251,13 +258,7 @@ description: $("t-description").value.trim() || null,
     } else {
       await api("/api/tasks", { method: "POST", body: JSON.stringify(payload) });
     }
-  } catch
-
-  const { error } = editingId
-    ? await db.from("Task").update(payload).eq("id", editingId)
-    : await db.from("Task").insert({ id: crypto.randomUUID(), ...payload });
-
-  if (error) {
+  } catch (error) {
     $("form-error").textContent = error.message;
     return;
   }
