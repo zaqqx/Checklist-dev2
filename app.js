@@ -4,6 +4,7 @@ const STATUS_LABELS = { A_FAIRE: "À faire", EN_COURS: "En cours", TERMINE: "Ter
 
 let editingId = null;
 let searchTimer;
+let tasksRequest = 0;
 
 /* ---------- Utilitaires ---------- */
 function el(tag, props = {}, ...children) {
@@ -127,6 +128,8 @@ $("new-dev").addEventListener("keydown", (event) => {
 
 /* ---------- Liste ---------- */
 async function loadTasks() {
+  // Seule la réponse de la dernière requête est affichée (évite des résultats périmés).
+  const request = ++tasksRequest;
   $("list-error").textContent = "";
 
   const params = new URLSearchParams();
@@ -146,10 +149,10 @@ async function loadTasks() {
   try {
     data = await api(`/api/tasks?${params.toString()}`);
   } catch (error) {
-    $("list-error").textContent = error.message;
+    if (request === tasksRequest) $("list-error").textContent = error.message;
     return;
   }
-  renderTasks(data);
+  if (request === tasksRequest) renderTasks(data);
 }
 
 function renderTasks(tasks) {
