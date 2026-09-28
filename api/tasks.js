@@ -15,6 +15,12 @@ function safeUrl(value) {
   }
 }
 
+// Date du jour (AAAA-MM-JJ) à Paris. Les deadlines sont stockées à minuit UTC
+// du jour d'échéance : une tâche n'est en retard qu'après la fin de ce jour.
+function todayInParis() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date());
+}
+
 function siteNameFrom(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -38,7 +44,7 @@ export default async function handler(req, res) {
       const term = String(search).trim().replace(/[%(),]/g, " ");
       if (term) query = query.or(`cabCode.ilike.%${term}%,siteName.ilike.%${term}%,description.ilike.%${term}%`);
     }
-    if (due === "overdue") query = query.lt("deadline", new Date().toISOString()).neq("status", "TERMINE");
+    if (due === "overdue") query = query.lt("deadline", `${todayInParis()}T00:00:00.000Z`).neq("status", "TERMINE");
     if (due === "without") query = query.is("deadline", null);
 
     const { data, error } = await query

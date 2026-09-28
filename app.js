@@ -22,6 +22,12 @@ function safeUrl(value) {
   }
 }
 
+// Date du jour (AAAA-MM-JJ) à Paris. Les deadlines sont stockées à minuit UTC
+// du jour d'échéance : une tâche n'est en retard qu'après la fin de ce jour.
+function todayInParis() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date());
+}
+
 function siteNameFrom(url) {
   try {
     return new URL(url).hostname.replace(/^www\./, "");
@@ -152,7 +158,7 @@ function renderTasks(tasks) {
 
 function renderTask(task) {
   const done = task.status === "TERMINE";
-  const overdue = !done && task.deadline && new Date(task.deadline) < new Date();
+  const overdue = !done && task.deadline && task.deadline.slice(0, 10) < todayInParis();
 
   const checkbox = el("input", { type: "checkbox", checked: done, disabled: done });
   checkbox.addEventListener("change", () => setStatus(task.id, "TERMINE"));
