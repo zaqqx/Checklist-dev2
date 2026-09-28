@@ -278,6 +278,8 @@ $("task-form").addEventListener("submit", async (event) => {
     assignedTo: $("t-assignedTo").value || null,
   };
 
+  const submit = $("task-form").querySelector('button[type="submit"]');
+  submit.disabled = true;
   try {
     if (editingId) {
       await api(`/api/tasks/${editingId}`, { method: "PATCH", body: JSON.stringify(payload) });
@@ -287,6 +289,8 @@ $("task-form").addEventListener("submit", async (event) => {
   } catch (error) {
     $("form-error").textContent = error.message;
     return;
+  } finally {
+    submit.disabled = false;
   }
   $("task-dialog").close();
   loadTasks();
