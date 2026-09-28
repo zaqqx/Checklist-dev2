@@ -71,3 +71,5 @@ dialog::backdrop { background: rgba(0,0,0,.4); }
 .row { display: flex; gap: .5rem; align-items: center; margin-bottom: .8rem; }
 .row input { margin: 0; }
 .row.end { justify-content: flex-end; margin: 1rem 0 0; }
+.dev-list { list-style: none; margin: .5rem 0 .8rem; padding: 0; display: flex; flex-direction: column; gap: .4rem; }
+.dev-list .row { margin: 0; }

@@ -3,6 +3,7 @@ const URGENCY_LABELS = { BASSE: "Basse", MOYENNE: "Moyenne", HAUTE: "Haute", CRI
 const STATUS_LABELS = { A_FAIRE: "À faire", EN_COURS: "En cours", TERMINE: "Terminé" };
 
 let editingId = null;
+let devs = [];
 let searchTimer;
 let tasksRequest = 0;
 
@@ -89,14 +90,20 @@ $("logout").addEventListener("click", async () => {
 
 /* ---------- Devs ---------- */
 async function loadDevs() {
-  let names = [];
   try {
-    names = (await api("/api/devs")).map((row) => row.name);
+    devs = await api("/api/devs");
   } catch {
     return;
   }
+  const names = devs.map((dev) => dev.name);
   fillSelect($("f-assigned"), names, "Tous les assignés", $("f-assigned").value);
   fillSelect($("t-assignedTo"), names, "— Non assigné —", $("t-assignedTo").value);
+  renderDevList();
+}
+
+async function addDev(name) {
+  await api("/api/devs", { method: "POST", body: JSON.stringify({ name }) });
+  await loadDevs();
 }
 
 function fillSelect(select, names, placeholder, selected) {
@@ -109,13 +116,12 @@ $("add-dev").addEventListener("click", async () => {
   const name = $("new-dev").value.trim();
   if (!name) return;
   try {
-    await api("/api/devs", { method: "POST", body: JSON.stringify({ name }) });
+    await addDev(name);
   } catch (error) {
     $("form-error").textContent = error.message;
     return;
   }
   $("new-dev").value = "";
-  await loadDevs();
   $("t-assignedTo").value = name;
 });
 
@@ -124,6 +130,73 @@ $("new-dev").addEventListener("keydown", (event) => {
   if (event.key !== "Enter") return;
   event.preventDefault();
   $("add-dev").click();
+});
+
+/* ---------- Paramètres ---------- */
+function renderDevList() {
+  const list = $("dev-list");
+  list.replaceChildren();
+  if (!devs.length) {
+    list.append(el("li", { className: "muted", textContent: "Aucun dev." }));
+    return;
+  }
+  devs.forEach((dev) => {
+    const input = el("input", { type: "text", value: dev.name, maxLength: 100, ariaLabel: "Nom du dev" });
+    input.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") return;
+      event.preventDefault();
+      renameDev(dev, input.value.trim());
+    });
+    const rename = el("button", { type: "button", className: "btn small", textContent: "Renommer" });
+    rename.addEventListener("click", () => renameDev(dev, input.value.trim()));
+    const remove = el("button", { type: "button", className: "btn small danger", textContent: "Supprimer" });
+    remove.addEventListener("click", () => deleteDev(dev));
+    list.append(el("li", { className: "row" }, input, rename, remove));
+  });
+}
+
+// Après un renommage ou une suppression, les tâches affichées changent aussi.
+async function settingsAction(action) {
+  $("settings-error").textContent = "";
+  try {
+    await action();
+  } catch (error) {
+    $("settings-error").textContent = error.message;
+    return;
+  }
+  await loadDevs();
+  loadTasks();
+}
+
+function renameDev(dev, name) {
+  if (!name || name === dev.name) return;
+  settingsAction(() => api(`/api/devs/${dev.id}`, { method: "PATCH", body: JSON.stringify({ name }) }));
+}
+
+function deleteDev(dev) {
+  if (!confirm(`Supprimer ${dev.name} ? Ses tâches seront désassignées.`)) return;
+  settingsAction(() => api(`/api/devs/${dev.id}`, { method: "DELETE" }));
+}
+
+$("settings").addEventListener("click", () => {
+  $("settings-error").textContent = "";
+  renderDevList();
+  $("settings-dialog").showModal();
+});
+$("settings-close").addEventListener("click", () => $("settings-dialog").close());
+
+$("settings-add").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const name = $("settings-new-dev").value.trim();
+  if (!name) return;
+  $("settings-error").textContent = "";
+  try {
+    await addDev(name);
+  } catch (error) {
+    $("settings-error").textContent = error.message;
+    return;
+  }
+  $("settings-new-dev").value = "";
 });
 
 /* ---------- Liste ---------- */

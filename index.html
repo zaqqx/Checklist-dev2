@@ -26,6 +26,7 @@
       <h1>Checklist</h1>
       <div class="actions">
         <button class="btn primary" id="new-task">Nouvelle tâche</button>
+        <button class="btn" id="settings">Paramètres</button>
         <button class="btn" id="logout">Se déconnecter</button>
       </div>
     </header>
@@ -91,6 +92,21 @@
         <button type="submit" class="btn primary">Enregistrer</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Paramètres -->
+  <dialog id="settings-dialog">
+    <h2>Paramètres</h2>
+    <p class="muted">Développeurs</p>
+    <ul id="dev-list" class="dev-list"></ul>
+    <form id="settings-add" class="row">
+      <input type="text" id="settings-new-dev" maxlength="100" placeholder="Nouveau dev" required>
+      <button type="submit" class="btn">Ajouter</button>
+    </form>
+    <p class="error" id="settings-error"></p>
+    <div class="row end">
+      <button type="button" class="btn" id="settings-close">Fermer</button>
+    </div>
   </dialog>
 
   <script src="app.js"></script>
