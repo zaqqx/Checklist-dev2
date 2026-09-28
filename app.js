@@ -1,6 +1,4 @@
-const db = supabase.createClient(CONFIG.SUPABASE_URL, CONFIG.SUPABASE_KEY);
 const $ = (id) => document.getElementById(id);
-const COLUMNS = "id,cabCode,cabLink,siteUrl,siteName,description,urgency,deadline,status,assignedTo";
 const URGENCY_LABELS = { BASSE: "Basse", MOYENNE: "Moyenne", HAUTE: "Haute", CRITIQUE: "Critique" };
 
 let editingId = null;
@@ -31,13 +29,27 @@ function siteNameFrom(url) {
   }
 }
 
+async function api(path, options = {}) {
+  const res = await fetch(path, {
+    ...options,
+    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+  });
+  let body = null;
+  try {
+    body = await res.json();
+  } catch {
+    /* réponse sans corps */
+  }
+  if (!res.ok) throw new Error(body?.error || "Erreur serveur");
+  return body;
+}
+
 /* ---------- Authentification ---------- */
 async function showView() {
-  const { data } = await db.auth.getSession();
-  const logged = Boolean(data.session);
-  $("login-view").hidden = logged;
-  $("app-view").hidden = !logged;
-  if (logged) {
+  const { authenticated } = await api("/api/session");
+  $("login-view").hidden = authenticated;
+  $("app-view").hidden = !authenticated;
+  if (authenticated) {
     await loadDevs();
     await loadTasks();
   }
@@ -46,11 +58,15 @@ async function showView() {
 $("login-form").addEventListener("submit", async (event) => {
   event.preventDefault();
   $("login-error").textContent = "";
-  const { error } = await db.auth.signInWithPassword({
-    email: $("login-email").value.trim(),
-    password: $("login-password").value,
-  });
-  if (error) {
+  try {
+    await api("/api/login", {
+      method: "POST",
+      body: JSON.stringify({
+        login: $("login-email").value.trim(),
+        password: $("login-password").value,
+      }),
+    });
+  } catch {
     $("login-error").textContent = "Identifiant ou mot de passe incorrect";
     return;
   }
@@ -59,15 +75,18 @@ $("login-form").addEventListener("submit", async (event) => {
 });
 
 $("logout").addEventListener("click", async () => {
-  await db.auth.signOut();
+  await api("/api/logout", { method: "POST" });
   showView();
 });
 
 /* ---------- Devs ---------- */
 async function loadDevs() {
-  const { data, error } = await db.from("Dev").select("name").order("name");
-  if (error) return;
-  const names = data.map((row) => row.name);
+  let names = [];
+  try {
+    names = (await api("/api/devs")).map((row) => row.name);
+  } catch {
+    return;
+  }
   fillSelect($("f-assigned"), names, "Tous les assignés", $("f-assigned").value);
   fillSelect($("t-assignedTo"), names, "— Non assigné —", $("t-assignedTo").value);
 }
@@ -81,8 +100,9 @@ function fillSelect(select, names, placeholder, selected) {
 $("add-dev").addEventListener("click", async () => {
   const name = $("new-dev").value.trim();
   if (!name) return;
-  const { error } = await db.from("Dev").insert({ id: crypto.randomUUID(), name });
-  if (error && error.code !== "23505") {
+  try {
+    await api("/api/devs", { method: "POST", body: JSON.stringify({ name }) });
+  } catch (error) {
     $("form-error").textContent = error.message;
     return;
   }
@@ -94,26 +114,24 @@ $("add-dev").addEventListener("click", async () => {
 /* ---------- Liste ---------- */
 async function loadTasks() {
   $("list-error").textContent = "";
-  let query = db.from("Task").select(COLUMNS);
 
+  const params = new URLSearchParams();
   const status = $("f-status").value;
   const assigned = $("f-assigned").value;
   const urgency = $("f-urgency").value;
   const due = $("f-due").value;
-  const search = $("f-search").value.trim().replace(/[%(),]/g, " ");
+  const search = $("f-search").value.trim();
 
-  if (status) query = query.eq("status", status);
-  if (assigned) query = query.eq("assignedTo", assigned);
-  if (urgency) query = query.eq("urgency", urgency);
-  if (search) query = query.or(`cabCode.ilike.%${search}%,siteName.ilike.%${search}%,description.ilike.%${search}%`);
-  if (due === "overdue") query = query.lt("deadline", new Date().toISOString()).neq("status", "TERMINE");
-  if (due === "without") query = query.is("deadline", null);
+  if (status) params.set("status", status);
+  if (assigned) params.set("assigned", assigned);
+  if (urgency) params.set("urgency", urgency);
+  if (due) params.set("due", due);
+  if (search) params.set("search", search);
 
-  const { data, error } = await query
-    .order("urgency", { ascending: false })
-    .order("deadline", { ascending: true, nullsFirst: false });
-
-  if (error) {
+  let data;
+  try {
+    data = await api(`/api/tasks?${params.toString()}`);
+  } catch (error) {
     $("list-error").textContent = error.message;
     return;
   }
@@ -177,15 +195,21 @@ function renderTask(task) {
 
 async function setStatus(id, status) {
   const { error } = await db.from("Task").update({ status }).eq("id", id);
-  if (error) $("list-error").textContent = error.message;
+  try {
+    await api(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
+  } catch (error) {
+    $("list-error").textContent = error.message;
+  }
   loadTasks();
 }
 
 async function removeTask(task) {
   if (!confirm(`Supprimer la tâche ${task.cabCode || task.siteName || task.siteUrl || ""} ?`)) return;
-  const { error } = await db.from("Task").delete().eq("id", task.id);
-  if (error) $("list-error").textContent = error.message;
-  loadTasks();
+  try {
+    await api(`/api/tasks/${task.id}`, { method: "DELETE" });
+  } catch (error) {
+    $("list-error").textContent = error.message;
+  }
 }
 
 /* ---------- Formulaire ---------- */
@@ -215,18 +239,19 @@ $("task-form").addEventListener("submit", async (event) => {
     $("form-error").textContent = "Lien invalide (http:// ou https:// requis)";
     return;
   }
-
-  const deadline = $("t-deadline").value;
-  const payload = {
-    cabCode: $("t-cabCode").value.trim() || null,
-    cabLink: cabLink || null,
-    siteUrl: siteUrl || null,
-    siteName: siteUrl ? siteNameFrom(siteUrl) : null,
-    description: $("t-description").value.trim() || null,
+description: $("t-description").value.trim() || null,
     urgency: $("t-urgency").value,
     deadline: deadline ? new Date(deadline).toISOString() : null,
     assignedTo: $("t-assignedTo").value || null,
   };
+
+  try {
+    if (editingId) {
+      await api(`/api/tasks/${editingId}`, { method: "PATCH", body: JSON.stringify(payload) });
+    } else {
+      await api("/api/tasks", { method: "POST", body: JSON.stringify(payload) });
+    }
+  } catch
 
   const { error } = editingId
     ? await db.from("Task").update(payload).eq("id", editingId)

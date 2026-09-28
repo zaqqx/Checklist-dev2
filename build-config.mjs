@@ -1,26 +1,18 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 
 if (existsSync(".env")) process.loadEnvFile(".env");
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const publishableKey = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-if (!supabaseUrl || !publishableKey) {
-  throw new Error("NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY are required.");
+// Vérifie au build que toute la configuration serveur nécessaire est présente.
+// Ces variables restent côté serveur (fonctions /api) et ne sont jamais envoyées au navigateur.
+const required = ["SUPABASE_URL", "SUPABASE_SECRET_KEY", "APP_LOGIN", "APP_PASSWORD", "SESSION_SECRET"];
+const missing = required.filter((key) => !process.env[key]);
+if (missing.length) {
+  throw new Error(`Missing required environment variables: ${missing.join(", ")}`);
 }
 
-if (publishableKey.startsWith("sb_secret_") || publishableKey === process.env.SUPABASE_SECRET_KEY) {
-  throw new Error("A Supabase secret key cannot be used in browser configuration.");
-}
-
-const parsedUrl = new URL(supabaseUrl);
+const parsedUrl = new URL(process.env.SUPABASE_URL);
 if (parsedUrl.protocol !== "https:") {
-  throw new Error("NEXT_PUBLIC_SUPABASE_URL must use HTTPS.");
+  throw new Error("SUPABASE_URL must use HTTPS.");
 }
 
-const config = {
-  SUPABASE_URL: supabaseUrl,
-  SUPABASE_KEY: publishableKey,
-};
-
-writeFileSync("config.js", `window.CONFIG = ${JSON.stringify(config, null, 2)};\n`);
+console.log("Configuration serveur validée.");

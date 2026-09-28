@@ -1,5 +1,5 @@
 {
   "buildCommand": "node build-config.mjs",
   "outputDirectory": ".",
-  "installCommand": "echo skip-install"
+  "installCommand": "npm install"
 }
