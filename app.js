@@ -56,19 +56,47 @@ async function api(path, options = {}) {
   } catch {
     /* réponse sans corps */
   }
-  if (!res.ok) throw new Error(body?.error || "Erreur serveur");
+  if (!res.ok) {
+    const error = new Error(body?.error || "Erreur serveur");
+    error.status = res.status;
+    throw error;
+  }
   return body;
 }
 
 /* ---------- Authentification ---------- */
+// Un seul appel au chargement (et à chaque actualisation) : session, devs et tâches.
 async function showView() {
-  const { authenticated } = await api("/api/session");
-  $("login-view").hidden = authenticated;
-  $("app-view").hidden = !authenticated;
-  if (authenticated) {
-    await loadDevs();
-    await loadTasks();
+  // Seule la réponse de la dernière requête est affichée (évite des résultats périmés).
+  const request = ++tasksRequest;
+  const version = mutationVersion;
+  let data;
+  try {
+    data = await api("/api/bootstrap");
+  } catch (error) {
+    if (request !== tasksRequest) return;
+    if (error.status === 401) {
+      $("login-view").hidden = false;
+      $("app-view").hidden = true;
+    } else if ($("app-view").hidden) {
+      $("login-view").hidden = false;
+      $("login-error").textContent = error.message;
+    } else {
+      $("list-error").textContent = error.message;
+    }
+    return;
   }
+  if (request !== tasksRequest) return;
+  $("login-view").hidden = true;
+  $("app-view").hidden = false;
+  $("list-error").textContent = "";
+  applyDevs(data.devs);
+  // Une action lancée pendant le chargement l'emporte sur les données reçues.
+  if (!pendingIds.size && version === mutationVersion) {
+    state.tasks = data.tasks;
+    state.loadedAt = Date.now();
+  }
+  render();
 }
 
 $("login-form").addEventListener("submit", async (event) => {
@@ -98,10 +126,14 @@ $("logout").addEventListener("click", async () => {
 /* ---------- Devs ---------- */
 async function loadDevs() {
   try {
-    devs = await api("/api/devs");
+    applyDevs(await api("/api/devs"));
   } catch {
-    return;
+    /* on garde la liste actuelle */
   }
+}
+
+function applyDevs(list) {
+  devs = list;
   const names = devs.map((dev) => dev.name);
   fillSelect($("f-assigned"), names, "Tous les assignés", $("f-assigned").value);
   fillSelect($("t-assignedTo"), names, "— Non assigné —", $("t-assignedTo").value);
@@ -213,25 +245,6 @@ $("settings-add").addEventListener("submit", async (event) => {
 });
 
 /* ---------- Liste ---------- */
-async function loadTasks() {
-  // Seule la réponse de la dernière requête est affichée (évite des résultats périmés).
-  const request = ++tasksRequest;
-  const version = mutationVersion;
-  $("list-error").textContent = "";
-
-  let data;
-  try {
-    data = await api("/api/tasks");
-  } catch (error) {
-    if (request === tasksRequest) $("list-error").textContent = error.message;
-    return;
-  }
-  if (request !== tasksRequest || pendingIds.size || version !== mutationVersion) return;
-  state.tasks = data;
-  state.loadedAt = Date.now();
-  render();
-}
-
 // Mêmes règles que le filtrage serveur de GET /api/tasks.
 function filterTasks(tasks) {
   const status = $("f-status").value;
@@ -548,10 +561,10 @@ $("reset").addEventListener("click", () => {
 });
 
 /* ---------- Actualisation ---------- */
-$("refresh").addEventListener("click", () => loadTasks());
+$("refresh").addEventListener("click", () => showView());
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible" && !$("app-view").hidden && Date.now() - state.loadedAt > REFRESH_AFTER_MS) {
-    loadTasks();
+    showView();
   }
 });
 
