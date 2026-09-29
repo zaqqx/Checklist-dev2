@@ -1,5 +1,5 @@
 -- À exécuter dans Supabase → SQL Editor.
--- Si les tables existent déjà (ancien projet), seules les sections "TRIGGERS" et "POLICIES" sont nécessaires.
+-- Si les tables existent déjà (ancien projet), seules les sections "INDEX", "TRIGGERS" et "POLICIES" sont nécessaires.
 
 do $$ begin
   create type "Urgency" as enum ('BASSE', 'MOYENNE', 'HAUTE', 'CRITIQUE');
@@ -29,6 +29,11 @@ create table if not exists "Dev" (
   name text not null unique,
   "createdAt" timestamptz not null default now()
 );
+
+-- INDEX : colonnes utilisées pour filtrer et trier les tâches
+create index if not exists "Task_status_idx" on "Task" (status);
+create index if not exists "Task_deadline_idx" on "Task" (deadline);
+create index if not exists "Task_assignedTo_idx" on "Task" ("assignedTo");
 
 -- TRIGGERS : met à jour "updatedAt" à chaque modification d'une tâche
 create or replace function set_updated_at() returns trigger
