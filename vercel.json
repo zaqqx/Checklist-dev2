@@ -2,6 +2,7 @@
   "buildCommand": "node build-config.mjs",
   "outputDirectory": ".",
   "installCommand": "npm install",
+  "regions": ["dub1"],
   "headers": [
     {
       "source": "/api/(.*)",

@@ -30,6 +30,23 @@ L'accès n'utilise plus Supabase Auth. La connexion se fait avec `APP_LOGIN` / `
    - `SESSION_SECRET` (chaîne aléatoire longue, ex. générée avec `openssl rand -base64 32`)
 4. La commande de build (`node build-config.mjs`) et le répertoire de sortie (`.`) sont déjà définis dans `vercel.json`.
 
+## Région des fonctions
+
+Chaque action passe par une fonction `/api` qui interroge Supabase : les fonctions doivent tourner dans la même région que la base, sinon chaque requête traverse l'Europe (ou l'Atlantique) en plus.
+
+1. **Supabase → Project Settings → General** : lire la région du projet (aussi visible en haut du tableau de bord).
+2. Mettre la région Vercel correspondante dans `vercel.json` (`"regions"`) :
+
+| Région Supabase | Région Vercel |
+|---|---|
+| West EU (Ireland) — `eu-west-1` | `dub1` |
+| West EU (London) — `eu-west-2` | `lhr1` |
+| West EU (Paris) — `eu-west-3` | `cdg1` |
+| Central EU (Frankfurt) — `eu-central-1` | `fra1` |
+| East US (North Virginia) — `us-east-1` | `iad1` |
+
+Le projet actuel est en `eu-west-1` (Irlande) : `vercel.json` utilise donc `dub1`. Après déploiement, la région est visible dans **Vercel → Deployments → (déploiement) → Functions**.
+
 ## Local
 
 ```bash
