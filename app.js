@@ -5,8 +5,10 @@ const URGENCY_ORDER = { CRITIQUE: 0, HAUTE: 1, MOYENNE: 2, BASSE: 3 };
 
 let editingId = null;
 let devs = [];
-let searchTimer;
 let tasksRequest = 0;
+// Toutes les tâches, chargées une fois : les filtres s'appliquent en mémoire.
+const state = { tasks: [], loadedAt: 0 };
+const REFRESH_AFTER_MS = 30_000;
 let doneOpen = false;
 
 /* ---------- Utilitaires ---------- */
@@ -207,27 +209,38 @@ async function loadTasks() {
   const request = ++tasksRequest;
   $("list-error").textContent = "";
 
-  const params = new URLSearchParams();
-  const status = $("f-status").value;
-  const assigned = $("f-assigned").value;
-  const urgency = $("f-urgency").value;
-  const due = $("f-due").value;
-  const search = $("f-search").value.trim();
-
-  if (status) params.set("status", status);
-  if (assigned) params.set("assigned", assigned);
-  if (urgency) params.set("urgency", urgency);
-  if (due) params.set("due", due);
-  if (search) params.set("search", search);
-
   let data;
   try {
-    data = await api(`/api/tasks?${params.toString()}`);
+    data = await api("/api/tasks");
   } catch (error) {
     if (request === tasksRequest) $("list-error").textContent = error.message;
     return;
   }
-  if (request === tasksRequest) renderTasks(data);
+  if (request !== tasksRequest) return;
+  state.tasks = data;
+  state.loadedAt = Date.now();
+  render();
+}
+
+// Mêmes règles que le filtrage serveur de GET /api/tasks.
+function filterTasks(tasks) {
+  const status = $("f-status").value;
+  const assigned = $("f-assigned").value;
+  const urgency = $("f-urgency").value;
+  const due = $("f-due").value;
+  const term = $("f-search").value.trim().replace(/[%(),]/g, " ").toLowerCase();
+
+  return tasks.filter((task) =>
+    (!status || task.status === status) &&
+    (!assigned || task.assignedTo === assigned) &&
+    (!urgency || task.urgency === urgency) &&
+    (due !== "overdue" || isOverdue(task)) &&
+    (due !== "without" || !task.deadline) &&
+    (!term || [task.cabCode, task.siteName, task.description].some((value) => value?.toLowerCase().includes(term))));
+}
+
+function render() {
+  renderTasks(filterTasks(state.tasks));
 }
 
 // Critique > Haute > Moyenne > Basse, puis échéance la plus proche (sans échéance en dernier).
@@ -256,6 +269,7 @@ function renderTasks(tasks) {
   tasks.forEach((task) => (task.status === "TERMINE" ? done : isOverdue(task) ? overdue : todo).push(task));
   overdue.sort(compareTasks);
   todo.sort(compareTasks);
+  done.sort(compareTasks);
 
   renderRecap({
     overdue: overdue.length,
@@ -482,7 +496,7 @@ async function applyStat(stat) {
     if ($("f-status").value === "TERMINE") $("f-status").value = "";
     if ($("f-due").value === "overdue") $("f-due").value = "";
   }
-  await loadTasks();
+  render();
   if (stat === "todo") $("section-todo")?.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
@@ -490,14 +504,20 @@ document.querySelectorAll(".recap .stat").forEach((button) =>
   button.addEventListener("click", () => applyStat(button.dataset.stat)));
 
 /* ---------- Filtres ---------- */
-["f-status", "f-assigned", "f-urgency", "f-due"].forEach((id) => $(id).addEventListener("change", loadTasks));
-$("f-search").addEventListener("input", () => {
-  clearTimeout(searchTimer);
-  searchTimer = setTimeout(loadTasks, 300);
-});
+// Filtres appliqués en mémoire : aucun appel réseau.
+["f-status", "f-assigned", "f-urgency", "f-due"].forEach((id) => $(id).addEventListener("change", render));
+$("f-search").addEventListener("input", render);
 $("reset").addEventListener("click", () => {
   ["f-search", "f-status", "f-assigned", "f-urgency", "f-due"].forEach((id) => ($(id).value = ""));
-  loadTasks();
+  render();
+});
+
+/* ---------- Actualisation ---------- */
+$("refresh").addEventListener("click", () => loadTasks());
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible" && !$("app-view").hidden && Date.now() - state.loadedAt > REFRESH_AFTER_MS) {
+    loadTasks();
+  }
 });
 
 /* ---------- Démarrage ---------- */
