@@ -1,8 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getAdminClient } from "./_lib/supabase.js";
 import { requireAuth } from "./_lib/auth-guard.js";
-
-const COLUMNS = "id,cabCode,cabLink,siteUrl,siteName,description,urgency,deadline,status,assignedTo";
+import { TASK_COLUMNS } from "./_lib/task-columns.js";
 const URGENCIES = new Set(["BASSE", "MOYENNE", "HAUTE", "CRITIQUE"]);
 const STATUSES = new Set(["A_FAIRE", "EN_COURS", "TERMINE"]);
 
@@ -36,7 +35,7 @@ export default async function handler(req, res) {
 
   if (req.method === "GET") {
     const { status, assigned, urgency, due, search } = req.query;
-    let query = db.from("Task").select(COLUMNS);
+    let query = db.from("Task").select(TASK_COLUMNS);
 
     if (status && STATUSES.has(status)) query = query.eq("status", status);
     if (assigned) query = query.eq("assignedTo", String(assigned));
@@ -79,9 +78,9 @@ export default async function handler(req, res) {
       assignedTo: typeof body.assignedTo === "string" ? body.assignedTo || null : null,
     };
 
-    const { error } = await db.from("Task").insert(payload);
+    const { data, error } = await db.from("Task").insert(payload).select(TASK_COLUMNS).single();
     if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ ok: true, id: payload.id });
+    return res.status(200).json(data);
   }
 
   res.status(405).json({ error: "Méthode non autorisée" });

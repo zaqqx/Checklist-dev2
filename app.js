@@ -9,6 +9,9 @@ let tasksRequest = 0;
 // Toutes les tâches, chargées une fois : les filtres s'appliquent en mémoire.
 const state = { tasks: [], loadedAt: 0 };
 const REFRESH_AFTER_MS = 30_000;
+// Actions en cours d'envoi : un rechargement lancé pendant ce temps ne doit pas écraser l'état optimiste.
+const pendingIds = new Set();
+let mutationVersion = 0;
 let doneOpen = false;
 
 /* ---------- Utilitaires ---------- */
@@ -159,8 +162,9 @@ function renderDevList() {
   });
 }
 
-// Après un renommage ou une suppression, les tâches affichées changent aussi.
-async function settingsAction(action) {
+// Après un renommage ou une suppression, l'API a aussi mis à jour les tâches :
+// on reporte le même changement sur les tâches en mémoire au lieu de tout recharger.
+async function settingsAction(action, reassign) {
   $("settings-error").textContent = "";
   try {
     await action();
@@ -168,18 +172,23 @@ async function settingsAction(action) {
     $("settings-error").textContent = error.message;
     return;
   }
+  mutationVersion++;
+  state.tasks.forEach((task) => {
+    if (task.assignedTo === reassign.from) task.assignedTo = reassign.to;
+  });
   await loadDevs();
-  loadTasks();
+  render();
 }
 
 function renameDev(dev, name) {
   if (!name || name === dev.name) return;
-  settingsAction(() => api(`/api/devs/${dev.id}`, { method: "PATCH", body: JSON.stringify({ name }) }));
+  settingsAction(() => api(`/api/devs/${dev.id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+    { from: dev.name, to: name });
 }
 
 function deleteDev(dev) {
   if (!confirm(`Supprimer ${dev.name} ? Ses tâches seront désassignées.`)) return;
-  settingsAction(() => api(`/api/devs/${dev.id}`, { method: "DELETE" }));
+  settingsAction(() => api(`/api/devs/${dev.id}`, { method: "DELETE" }), { from: dev.name, to: null });
 }
 
 $("settings").addEventListener("click", () => {
@@ -207,6 +216,7 @@ $("settings-add").addEventListener("submit", async (event) => {
 async function loadTasks() {
   // Seule la réponse de la dernière requête est affichée (évite des résultats périmés).
   const request = ++tasksRequest;
+  const version = mutationVersion;
   $("list-error").textContent = "";
 
   let data;
@@ -216,7 +226,7 @@ async function loadTasks() {
     if (request === tasksRequest) $("list-error").textContent = error.message;
     return;
   }
-  if (request !== tasksRequest) return;
+  if (request !== tasksRequest || pendingIds.size || version !== mutationVersion) return;
   state.tasks = data;
   state.loadedAt = Date.now();
   render();
@@ -241,6 +251,32 @@ function filterTasks(tasks) {
 
 function render() {
   renderTasks(filterTasks(state.tasks));
+}
+
+function upsertTask(task) {
+  const index = state.tasks.findIndex((item) => item.id === task.id);
+  if (index === -1) state.tasks.push(task);
+  else state.tasks[index] = task;
+}
+
+// Mise à jour optimiste : l'état et l'affichage changent tout de suite, la requête part
+// en arrière-plan ; en cas d'erreur, `rollback` restaure l'état précédent.
+async function optimistic(id, apply, request, rollback) {
+  $("list-error").textContent = "";
+  apply();
+  mutationVersion++;
+  pendingIds.add(id);
+  render();
+  try {
+    const saved = await request();
+    if (saved?.id) upsertTask(saved);
+  } catch (error) {
+    rollback();
+    $("list-error").textContent = error.message;
+  } finally {
+    pendingIds.delete(id);
+  }
+  render();
 }
 
 // Critique > Haute > Moyenne > Basse, puis échéance la plus proche (sans échéance en dernier).
@@ -389,28 +425,25 @@ function renderTask(task) {
   return el("li", { className: `task urg-${task.urgency}${done ? " done" : ""}${overdue ? " overdue" : ""}` }, checkbox, body, btns);
 }
 
-async function setStatus(id, status) {
-  try {
-    await api(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }) });
-  } catch (error) {
-    // Recharge d'abord (remet la carte dans son vrai état), puis affiche l'erreur
-    // que loadTasks() aurait sinon effacée.
-    await loadTasks();
-    $("list-error").textContent = error.message;
-    return;
-  }
-  loadTasks();
+function setStatus(id, status) {
+  const task = state.tasks.find((item) => item.id === id);
+  if (!task || task.status === status) return;
+  const previous = task.status;
+  optimistic(id,
+    () => (task.status = status),
+    () => api(`/api/tasks/${id}`, { method: "PATCH", body: JSON.stringify({ status }) }),
+    () => (task.status = previous));
 }
 
-async function removeTask(task) {
+function removeTask(task) {
   if (!confirm(`Supprimer la tâche ${task.cabCode || task.siteName || task.siteUrl || ""} ?`)) return;
-  try {
-    await api(`/api/tasks/${task.id}`, { method: "DELETE" });
-  } catch (error) {
-    $("list-error").textContent = error.message;
-    return;
-  }
-  loadTasks();
+  const index = state.tasks.findIndex((item) => item.id === task.id);
+  if (index === -1) return;
+  const removed = state.tasks[index];
+  optimistic(task.id,
+    () => state.tasks.splice(index, 1),
+    () => api(`/api/tasks/${task.id}`, { method: "DELETE" }),
+    () => state.tasks.splice(Math.min(index, state.tasks.length), 0, removed));
 }
 
 /* ---------- Formulaire ---------- */
@@ -455,20 +488,22 @@ $("task-form").addEventListener("submit", async (event) => {
 
   const submit = $("task-form").querySelector('button[type="submit"]');
   submit.disabled = true;
+  let saved;
   try {
-    if (editingId) {
-      await api(`/api/tasks/${editingId}`, { method: "PATCH", body: JSON.stringify(payload) });
-    } else {
-      await api("/api/tasks", { method: "POST", body: JSON.stringify(payload) });
-    }
+    saved = editingId
+      ? await api(`/api/tasks/${editingId}`, { method: "PATCH", body: JSON.stringify(payload) })
+      : await api("/api/tasks", { method: "POST", body: JSON.stringify(payload) });
   } catch (error) {
     $("form-error").textContent = error.message;
     return;
   } finally {
     submit.disabled = false;
   }
+  // L'API renvoie la tâche enregistrée : on la place dans l'état sans tout recharger.
+  mutationVersion++;
+  upsertTask(saved);
   $("task-dialog").close();
-  loadTasks();
+  render();
 });
 
 /* ---------- Récapitulatif ---------- */

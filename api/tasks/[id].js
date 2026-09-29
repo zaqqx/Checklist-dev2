@@ -1,5 +1,6 @@
 import { getAdminClient } from "../_lib/supabase.js";
 import { requireAuth } from "../_lib/auth-guard.js";
+import { TASK_COLUMNS } from "../_lib/task-columns.js";
 
 const URGENCIES = new Set(["BASSE", "MOYENNE", "HAUTE", "CRITIQUE"]);
 const STATUSES = new Set(["A_FAIRE", "EN_COURS", "TERMINE"]);
@@ -63,9 +64,10 @@ export default async function handler(req, res) {
       patch.assignedTo = typeof body.assignedTo === "string" ? body.assignedTo || null : null;
     }
 
-    const { error } = await db.from("Task").update(patch).eq("id", id);
+    const { data, error } = await db.from("Task").update(patch).eq("id", id).select(TASK_COLUMNS).single();
+    if (error?.code === "PGRST116") return res.status(404).json({ error: "Tâche introuvable" });
     if (error) return res.status(500).json({ error: error.message });
-    return res.status(200).json({ ok: true });
+    return res.status(200).json(data);
   }
 
   if (req.method === "DELETE") {
