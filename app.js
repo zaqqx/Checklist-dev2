@@ -13,6 +13,8 @@ const REFRESH_AFTER_MS = 30_000;
 const pendingIds = new Set();
 let mutationVersion = 0;
 let doneOpen = false;
+// Disposition affichée (sections et ordre des cartes) : si elle ne change pas, seules les cartes modifiées sont remplacées.
+let renderedLayout = null;
 
 /* ---------- Utilitaires ---------- */
 function el(tag, props = {}, ...children) {
@@ -262,8 +264,9 @@ function filterTasks(tasks) {
     (!term || [task.cabCode, task.siteName, task.description].some((value) => value?.toLowerCase().includes(term))));
 }
 
-function render() {
-  renderTasks(filterTasks(state.tasks));
+// changedIds : tâches modifiées, pour ne remplacer que leurs cartes quand c'est possible.
+function render(changedIds = null) {
+  renderTasks(filterTasks(state.tasks), changedIds);
 }
 
 function upsertTask(task) {
@@ -279,7 +282,7 @@ async function optimistic(id, apply, request, rollback) {
   apply();
   mutationVersion++;
   pendingIds.add(id);
-  render();
+  render([id]);
   try {
     const saved = await request();
     if (saved?.id) upsertTask(saved);
@@ -289,7 +292,7 @@ async function optimistic(id, apply, request, rollback) {
   } finally {
     pendingIds.delete(id);
   }
-  render();
+  render([id]);
 }
 
 // Critique > Haute > Moyenne > Basse, puis échéance la plus proche (sans échéance en dernier).
@@ -309,7 +312,7 @@ function isOverdue(task) {
   return task.status !== "TERMINE" && Boolean(task.deadline) && daysUntil(task.deadline) < 0;
 }
 
-function renderTasks(tasks) {
+function renderTasks(tasks, changedIds = null) {
   $("count").textContent = `${tasks.length} résultat${tasks.length > 1 ? "s" : ""}`;
 
   const overdue = [];
@@ -327,28 +330,44 @@ function renderTasks(tasks) {
     done: done.length,
   });
 
+  // Avec un filtre de statut, seule la section correspondante est affichée.
+  const status = $("f-status").value;
+  const sections = [];
+  if (status !== "TERMINE") {
+    if (overdue.length) sections.push(["overdue", "En retard", overdue]);
+    if (todo.length) sections.push(["todo", "À traiter", todo]);
+  }
+  if ((!status || status === "TERMINE") && done.length) sections.push(["done", "Terminées", done]);
+
   const list = $("tasks");
-  list.replaceChildren();
-  if (!tasks.length) {
-    list.append(el("p", { className: "muted empty", textContent: "Aucune tâche ne correspond aux filtres." }));
+  const layout = sections.map(([id, , items]) => `${id}:${items.map((task) => task.id).join(",")}`).join("|");
+  if (changedIds && layout === renderedLayout) {
+    changedIds.forEach((id) => {
+      const card = list.querySelector(`li[data-id="${CSS.escape(id)}"]`);
+      const task = tasks.find((item) => item.id === id);
+      if (card && task) card.replaceWith(renderTask(task));
+    });
     return;
   }
 
-  // Avec un filtre de statut, seule la section correspondante est affichée.
-  const status = $("f-status").value;
-  if (status !== "TERMINE") {
-    if (overdue.length) list.append(taskSection("overdue", "En retard", overdue));
-    if (todo.length) list.append(taskSection("todo", "À traiter", todo));
+  renderedLayout = layout;
+  const fragment = document.createDocumentFragment();
+  if (!sections.length) {
+    fragment.append(el("p", { className: "muted empty", textContent: "Aucune tâche ne correspond aux filtres." }));
   }
-  if ((!status || status === "TERMINE") && done.length) {
-    const details = el("details", { id: "section-done", className: "task-section done", open: status === "TERMINE" || doneOpen },
-      el("summary", { className: "section-title", textContent: `Terminées (${done.length})` }),
-      el("ul", { className: "tasks" }, ...done.map((task) => renderTask(task))));
-    details.addEventListener("toggle", () => {
-      if ($("f-status").value !== "TERMINE") doneOpen = details.open;
-    });
-    list.append(details);
-  }
+  sections.forEach(([id, title, items]) =>
+    fragment.append(id === "done" ? doneSection(items, status) : taskSection(id, title, items)));
+  list.replaceChildren(fragment);
+}
+
+function doneSection(tasks, status) {
+  const details = el("details", { id: "section-done", className: "task-section done", open: status === "TERMINE" || doneOpen },
+    el("summary", { className: "section-title", textContent: `Terminées (${tasks.length})` }),
+    el("ul", { className: "tasks" }, ...tasks.map((task) => renderTask(task))));
+  details.addEventListener("toggle", () => {
+    if ($("f-status").value !== "TERMINE") doneOpen = details.open;
+  });
+  return details;
 }
 
 function taskSection(id, title, tasks) {
@@ -435,7 +454,9 @@ function renderTask(task) {
     btns.append(status, edit, duplicate, remove);
   }
 
-  return el("li", { className: `task urg-${task.urgency}${done ? " done" : ""}${overdue ? " overdue" : ""}` }, checkbox, body, btns);
+  const card = el("li", { className: `task urg-${task.urgency}${done ? " done" : ""}${overdue ? " overdue" : ""}` }, checkbox, body, btns);
+  card.dataset.id = task.id;
+  return card;
 }
 
 function setStatus(id, status) {
@@ -516,7 +537,7 @@ $("task-form").addEventListener("submit", async (event) => {
   mutationVersion++;
   upsertTask(saved);
   $("task-dialog").close();
-  render();
+  render([saved.id]);
 });
 
 /* ---------- Récapitulatif ---------- */
