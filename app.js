@@ -156,11 +156,14 @@ function fillSelect(select, names, placeholder, selected) {
 $("add-dev").addEventListener("click", async () => {
   const name = $("new-dev").value.trim();
   if (!name) return;
+  $("add-dev").disabled = true;
   try {
     await addDev(name);
   } catch (error) {
     $("form-error").textContent = error.message;
     return;
+  } finally {
+    $("add-dev").disabled = false;
   }
   $("new-dev").value = "";
   $("t-assignedTo").value = name;
@@ -186,25 +189,28 @@ function renderDevList() {
     input.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
-      renameDev(dev, input.value.trim());
+      renameDev(rename, dev, input.value.trim());
     });
     const rename = el("button", { type: "button", className: "btn small", textContent: "Renommer" });
-    rename.addEventListener("click", () => renameDev(dev, input.value.trim()));
+    rename.addEventListener("click", () => renameDev(rename, dev, input.value.trim()));
     const remove = el("button", { type: "button", className: "btn small danger", textContent: "Supprimer" });
-    remove.addEventListener("click", () => deleteDev(dev));
+    remove.addEventListener("click", () => deleteDev(remove, dev));
     list.append(el("li", { className: "row" }, input, rename, remove));
   });
 }
 
 // Après un renommage ou une suppression, l'API a aussi mis à jour les tâches :
 // on reporte le même changement sur les tâches en mémoire au lieu de tout recharger.
-async function settingsAction(action, reassign) {
+async function settingsAction(button, action, reassign) {
   $("settings-error").textContent = "";
+  button.disabled = true;
   try {
     await action();
   } catch (error) {
     $("settings-error").textContent = error.message;
     return;
+  } finally {
+    button.disabled = false;
   }
   mutationVersion++;
   state.tasks.forEach((task) => {
@@ -214,15 +220,15 @@ async function settingsAction(action, reassign) {
   render();
 }
 
-function renameDev(dev, name) {
+function renameDev(button, dev, name) {
   if (!name || name === dev.name) return;
-  settingsAction(() => api(`/api/devs/${dev.id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
+  settingsAction(button, () => api(`/api/devs/${dev.id}`, { method: "PATCH", body: JSON.stringify({ name }) }),
     { from: dev.name, to: name });
 }
 
-function deleteDev(dev) {
+function deleteDev(button, dev) {
   if (!confirm(`Supprimer ${dev.name} ? Ses tâches seront désassignées.`)) return;
-  settingsAction(() => api(`/api/devs/${dev.id}`, { method: "DELETE" }), { from: dev.name, to: null });
+  settingsAction(button, () => api(`/api/devs/${dev.id}`, { method: "DELETE" }), { from: dev.name, to: null });
 }
 
 $("settings").addEventListener("click", () => {
@@ -237,11 +243,15 @@ $("settings-add").addEventListener("submit", async (event) => {
   const name = $("settings-new-dev").value.trim();
   if (!name) return;
   $("settings-error").textContent = "";
+  const submit = $("settings-add").querySelector('button[type="submit"]');
+  submit.disabled = true;
   try {
     await addDev(name);
   } catch (error) {
     $("settings-error").textContent = error.message;
     return;
+  } finally {
+    submit.disabled = false;
   }
   $("settings-new-dev").value = "";
 });
@@ -400,7 +410,9 @@ function renderTask(task) {
   const done = task.status === "TERMINE";
   const overdue = isOverdue(task);
 
-  const checkbox = el("input", { type: "checkbox", checked: done, disabled: done, ariaLabel: "Marquer comme terminée" });
+  // Action en cours d'envoi sur cette tâche : ses contrôles sont désactivés (évite les doubles clics).
+  const pending = pendingIds.has(task.id);
+  const checkbox = el("input", { type: "checkbox", checked: done, disabled: done || pending, ariaLabel: "Marquer comme terminée" });
   checkbox.addEventListener("change", () => setStatus(task.id, "TERMINE"));
 
   // Ligne 1 : code CAB + site, pastilles à droite.
@@ -440,16 +452,16 @@ function renderTask(task) {
   const duplicate = el("button", { className: "btn small", textContent: "Dupliquer" });
   duplicate.addEventListener("click", () => openForm(task, true));
   if (done) {
-    const restore = el("button", { className: "btn small", textContent: "Restaurer" });
+    const restore = el("button", { className: "btn small", textContent: "Restaurer", disabled: pending });
     restore.addEventListener("click", () => setStatus(task.id, "A_FAIRE"));
     btns.append(restore, edit, duplicate);
   } else {
-    const status = el("select", { ariaLabel: "Statut" },
+    const status = el("select", { ariaLabel: "Statut", disabled: pending },
       el("option", { value: "A_FAIRE", textContent: STATUS_LABELS.A_FAIRE }),
       el("option", { value: "EN_COURS", textContent: STATUS_LABELS.EN_COURS }));
     status.value = task.status;
     status.addEventListener("change", () => setStatus(task.id, status.value));
-    const remove = el("button", { className: "btn small danger", textContent: "Supprimer" });
+    const remove = el("button", { className: "btn small danger", textContent: "Supprimer", disabled: pending });
     remove.addEventListener("click", () => removeTask(task));
     btns.append(status, edit, duplicate, remove);
   }
