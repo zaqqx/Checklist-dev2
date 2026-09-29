@@ -29,7 +29,6 @@ function siteNameFrom(url) {
 }
 
 export default async function handler(req, res) {
-  const startedAt = performance.now(); // TEMP mesure
   if (!requireAuth(req, res)) return;
   const db = getAdminClient();
 
@@ -47,12 +46,9 @@ export default async function handler(req, res) {
     if (due === "overdue") query = query.lt("deadline", `${todayInParis()}T00:00:00.000Z`).neq("status", "TERMINE");
     if (due === "without") query = query.is("deadline", null);
 
-    const dbStartedAt = performance.now(); // TEMP mesure
     const { data, error } = await query
       .order("urgency", { ascending: false })
       .order("deadline", { ascending: true, nullsFirst: false });
-    const dbMs = performance.now() - dbStartedAt; // TEMP mesure
-    res.setHeader("Server-Timing", `db;dur=${dbMs.toFixed(1)}, total;dur=${(performance.now() - startedAt).toFixed(1)}`); // TEMP mesure
 
     if (error) return res.status(500).json({ error: error.message });
     return res.status(200).json(data);
