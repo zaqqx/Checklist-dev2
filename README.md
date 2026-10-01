@@ -64,3 +64,16 @@ Copier `.env.example` vers `.env` et renseigner les variables avant de lancer. `
 - Les comparaisons de l'identifiant et du mot de passe se font en temps constant (`crypto.timingSafeEqual`) pour limiter les attaques par timing.
 - Ne jamais exposer `SUPABASE_SECRET_KEY`, `APP_PASSWORD` ou `SESSION_SECRET` dans du code client ni les ajouter à Git.
 
+## Dépannage
+
+### « JWT issued at future »
+
+Avec une clé `sb_secret_...`, Supabase génère lui-même, à chaque requête, un JWT court que PostgREST vérifie ensuite. Un léger décalage d'horloge entre les deux côtés de Supabase peut faire juger ce JWT « émis dans le futur » : la requête échoue, la suivante passe. Notre cookie de session n'est pas en cause.
+
+L'application s'en protège automatiquement :
+- côté serveur, `withRetry` (`api/_lib/retry.js`) réessaie jusqu'à 2 fois, après ~300 ms, les erreurs JWT (« JWT issued at future », `PGRST301`, `PGRST303`) ;
+- côté client, une réponse 5xx est réessayée une fois avant d'afficher « Erreur temporaire, réessaie ».
+
+Le détail de chaque erreur reste visible dans les logs des fonctions (**Vercel → Deployments → Functions**, lignes `Supabase : erreur JWT transitoire` et `Erreur serveur`).
+
+**Si l'erreur persiste** (message affiché souvent malgré les nouveaux essais) : remplacer temporairement `SUPABASE_SECRET_KEY` par la clé legacy `service_role` (**Supabase → Settings → API Keys → Legacy API Keys**, valeur au format `eyJ...`). Elle est déjà signée et ne passe pas par cette génération de JWT. Elle donne les mêmes droits que la clé secrète : mêmes précautions (jamais côté navigateur, jamais dans Git). Revenir à `sb_secret_...` une fois le problème résolu côté Supabase, et le leur signaler avec le `sb-request-id` présent dans les logs.
