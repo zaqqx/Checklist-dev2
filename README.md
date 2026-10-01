@@ -1,6 +1,6 @@
 # Checklist (HTML / CSS / JS)
 
-Site statique + fonctions serverless Vercel (`/api`) + Supabase. Node.js 20.12+ est nécessaire.
+Site statique + fonctions serverless Vercel (`/api`) + Supabase. Node.js 22+ est nécessaire.
 
 ## Structure
 .
