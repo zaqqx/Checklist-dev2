@@ -47,23 +47,30 @@ function siteNameFrom(url) {
   }
 }
 
+const API_RETRY_DELAY_MS = 300;
+
 async function api(path, options = {}) {
-  const res = await fetch(path, {
-    ...options,
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
-  });
-  let body = null;
-  try {
-    body = await res.json();
-  } catch {
-    /* réponse sans corps */
-  }
-  if (!res.ok) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(path, {
+      ...options,
+      headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    });
+    let body = null;
+    try {
+      body = await res.json();
+    } catch {
+      /* réponse sans corps */
+    }
+    if (res.ok) return body;
+    // Erreur serveur (5xx), souvent transitoire : un nouvel essai automatique avant d'afficher l'erreur.
+    if (res.status >= 500 && attempt === 0) {
+      await new Promise((resolve) => setTimeout(resolve, API_RETRY_DELAY_MS));
+      continue;
+    }
     const error = new Error(body?.error || "Erreur serveur");
     error.status = res.status;
     throw error;
   }
-  return body;
 }
 
 /* ---------- Authentification ---------- */
