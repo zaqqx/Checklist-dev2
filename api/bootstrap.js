@@ -1,6 +1,8 @@
 import { isAuthenticated } from "./_lib/session.js";
 import { getAdminClient } from "./_lib/supabase.js";
 import { TASK_COLUMNS } from "./_lib/task-columns.js";
+import { withRetry } from "./_lib/retry.js";
+import { serverError } from "./_lib/errors.js";
 
 // Tout ce qu'il faut pour afficher l'application, en un seul appel.
 export default async function handler(req, res) {
@@ -9,13 +11,13 @@ export default async function handler(req, res) {
 
   const db = getAdminClient();
   const [devs, tasks] = await Promise.all([
-    db.from("Dev").select("id,name").order("name"),
-    db.from("Task").select(TASK_COLUMNS)
+    withRetry(() => db.from("Dev").select("id,name").order("name")),
+    withRetry(() => db.from("Task").select(TASK_COLUMNS)
       .order("urgency", { ascending: false })
-      .order("deadline", { ascending: true, nullsFirst: false }),
+      .order("deadline", { ascending: true, nullsFirst: false })),
   ]);
 
   const error = devs.error || tasks.error;
-  if (error) return res.status(500).json({ error: error.message });
+  if (error) return serverError(res, error);
   return res.status(200).json({ authenticated: true, devs: devs.data, tasks: tasks.data });
 }

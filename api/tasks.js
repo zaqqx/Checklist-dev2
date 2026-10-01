@@ -2,6 +2,8 @@ import { randomUUID } from "node:crypto";
 import { getAdminClient } from "./_lib/supabase.js";
 import { requireAuth } from "./_lib/auth-guard.js";
 import { TASK_COLUMNS } from "./_lib/task-columns.js";
+import { withRetry } from "./_lib/retry.js";
+import { serverError } from "./_lib/errors.js";
 const URGENCIES = new Set(["BASSE", "MOYENNE", "HAUTE", "CRITIQUE"]);
 const STATUSES = new Set(["A_FAIRE", "EN_COURS", "TERMINE"]);
 
@@ -34,23 +36,27 @@ export default async function handler(req, res) {
 
   if (req.method === "GET") {
     const { status, assigned, urgency, due, search } = req.query;
-    let query = db.from("Task").select(TASK_COLUMNS);
+    // La requête est reconstruite à chaque essai de withRetry.
+    const buildQuery = () => {
+      let query = db.from("Task").select(TASK_COLUMNS);
 
-    if (status && STATUSES.has(status)) query = query.eq("status", status);
-    if (assigned) query = query.eq("assignedTo", String(assigned));
-    if (urgency && URGENCIES.has(urgency)) query = query.eq("urgency", urgency);
-    if (search) {
-      const term = String(search).trim().replace(/[%(),]/g, " ");
-      if (term) query = query.or(`cabCode.ilike.%${term}%,siteName.ilike.%${term}%,description.ilike.%${term}%`);
-    }
-    if (due === "overdue") query = query.lt("deadline", `${todayInParis()}T00:00:00.000Z`).neq("status", "TERMINE");
-    if (due === "without") query = query.is("deadline", null);
+      if (status && STATUSES.has(status)) query = query.eq("status", status);
+      if (assigned) query = query.eq("assignedTo", String(assigned));
+      if (urgency && URGENCIES.has(urgency)) query = query.eq("urgency", urgency);
+      if (search) {
+        const term = String(search).trim().replace(/[%(),]/g, " ");
+        if (term) query = query.or(`cabCode.ilike.%${term}%,siteName.ilike.%${term}%,description.ilike.%${term}%`);
+      }
+      if (due === "overdue") query = query.lt("deadline", `${todayInParis()}T00:00:00.000Z`).neq("status", "TERMINE");
+      if (due === "without") query = query.is("deadline", null);
 
-    const { data, error } = await query
-      .order("urgency", { ascending: false })
-      .order("deadline", { ascending: true, nullsFirst: false });
+      return query
+        .order("urgency", { ascending: false })
+        .order("deadline", { ascending: true, nullsFirst: false });
+    };
 
-    if (error) return res.status(500).json({ error: error.message });
+    const { data, error } = await withRetry(buildQuery);
+    if (error) return serverError(res, error);
     return res.status(200).json(data);
   }
 
@@ -74,8 +80,13 @@ export default async function handler(req, res) {
       assignedTo: typeof body.assignedTo === "string" ? body.assignedTo || null : null,
     };
 
-    const { data, error } = await db.from("Task").insert(payload).select(TASK_COLUMNS).single();
-    if (error) return res.status(500).json({ error: error.message });
+    const inserted = await withRetry(() => db.from("Task").insert(payload).select(TASK_COLUMNS).single(), { insert: true });
+    if (inserted.error) return serverError(res, inserted.error);
+    if (!inserted.duplicate) return res.status(200).json(inserted.data);
+
+    // Un essai précédent avait inséré la tâche : on la relit.
+    const { data, error } = await withRetry(() => db.from("Task").select(TASK_COLUMNS).eq("id", payload.id).single());
+    if (error) return serverError(res, error);
     return res.status(200).json(data);
   }
 
