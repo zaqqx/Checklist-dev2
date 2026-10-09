@@ -1,6 +1,6 @@
 import { getAdminClient } from "../_lib/supabase.js";
 import { requireAuth } from "../_lib/auth-guard.js";
-import { TASK_COLUMNS } from "../_lib/task-columns.js";
+import { TASK_COLUMNS, normalizeTask } from "../_lib/task-columns.js";
 import { withRetry } from "../_lib/retry.js";
 import { serverError } from "../_lib/errors.js";
 
@@ -72,7 +72,7 @@ export default async function handler(req, res) {
     const { data, error } = await withRetry(() => db.from("Task").update(patch).eq("id", id).select(TASK_COLUMNS).single());
     if (error?.code === "PGRST116") return res.status(404).json({ error: "Tâche introuvable" });
     if (error) return serverError(res, error);
-    return res.status(200).json(data);
+    return res.status(200).json(normalizeTask(data));
   }
 
   if (req.method === "DELETE") {

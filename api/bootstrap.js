@@ -1,6 +1,6 @@
 import { isAuthenticated } from "./_lib/session.js";
 import { getAdminClient } from "./_lib/supabase.js";
-import { TASK_COLUMNS } from "./_lib/task-columns.js";
+import { TASK_COLUMNS, normalizeTask } from "./_lib/task-columns.js";
 import { withRetry } from "./_lib/retry.js";
 import { serverError } from "./_lib/errors.js";
 
@@ -19,5 +19,5 @@ export default async function handler(req, res) {
 
   const error = devs.error || tasks.error;
   if (error) return serverError(res, error);
-  return res.status(200).json({ authenticated: true, devs: devs.data, tasks: tasks.data });
+  return res.status(200).json({ authenticated: true, devs: devs.data, tasks: tasks.data.map(normalizeTask) });
 }

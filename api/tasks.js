@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { getAdminClient } from "./_lib/supabase.js";
 import { requireAuth } from "./_lib/auth-guard.js";
-import { TASK_COLUMNS } from "./_lib/task-columns.js";
+import { TASK_COLUMNS, normalizeTask } from "./_lib/task-columns.js";
 import { withRetry } from "./_lib/retry.js";
 import { serverError } from "./_lib/errors.js";
 const URGENCIES = new Set(["BASSE", "MOYENNE", "HAUTE", "CRITIQUE"]);
@@ -57,7 +57,7 @@ export default async function handler(req, res) {
 
     const { data, error } = await withRetry(buildQuery);
     if (error) return serverError(res, error);
-    return res.status(200).json(data);
+    return res.status(200).json(data.map(normalizeTask));
   }
 
   if (req.method === "POST") {
@@ -83,12 +83,12 @@ export default async function handler(req, res) {
 
     const inserted = await withRetry(() => db.from("Task").insert(payload).select(TASK_COLUMNS).single(), { insert: true });
     if (inserted.error) return serverError(res, inserted.error);
-    if (!inserted.duplicate) return res.status(200).json(inserted.data);
+    if (!inserted.duplicate) return res.status(200).json(normalizeTask(inserted.data));
 
     // Un essai précédent avait inséré la tâche : on la relit.
     const { data, error } = await withRetry(() => db.from("Task").select(TASK_COLUMNS).eq("id", payload.id).single());
     if (error) return serverError(res, error);
-    return res.status(200).json(data);
+    return res.status(200).json(normalizeTask(data));
   }
 
   res.status(405).json({ error: "Méthode non autorisée" });
