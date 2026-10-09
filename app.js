@@ -288,7 +288,7 @@ function filterTasks(tasks) {
     (!urgency || task.urgency === urgency) &&
     (due !== "overdue" || isOverdue(task)) &&
     (due !== "without" || !task.deadline) &&
-    (!term || [task.cabCode, task.siteName, task.description].some((value) => value?.toLowerCase().includes(term))));
+    (!term || [task.cabCode, task.siteName, task.description, task.notes].some((value) => value?.toLowerCase().includes(term))));
 }
 
 // changedIds : tâches modifiées, pour ne remplacer que leurs cartes quand c'est possible.

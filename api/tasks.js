@@ -45,7 +45,7 @@ export default async function handler(req, res) {
       if (urgency && URGENCIES.has(urgency)) query = query.eq("urgency", urgency);
       if (search) {
         const term = String(search).trim().replace(/[%(),]/g, " ");
-        if (term) query = query.or(`cabCode.ilike.%${term}%,siteName.ilike.%${term}%,description.ilike.%${term}%`);
+        if (term) query = query.or(`cabCode.ilike.%${term}%,siteName.ilike.%${term}%,description.ilike.%${term}%,notes.ilike.%${term}%`);
       }
       if (due === "overdue") query = query.lt("deadline", `${todayInParis()}T00:00:00.000Z`).neq("status", "TERMINE");
       if (due === "without") query = query.is("deadline", null);
