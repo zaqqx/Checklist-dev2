@@ -15,6 +15,15 @@ let mutationVersion = 0;
 let doneOpen = false;
 // Disposition affichée (sections et ordre des cartes) : si elle ne change pas, seules les cartes modifiées sont remplacées.
 let renderedLayout = null;
+// Volet de détail : un seul ouvert à la fois ; commentaires chargés à la première ouverture puis gardés en mémoire.
+const detail = {
+  openId: null,
+  comments: new Map(), // taskId → commentaires
+  loading: new Set(),
+  errors: new Map(), // taskId → message d'erreur du volet
+  drafts: new Map(), // taskId → commentaire en cours de saisie
+};
+const AUTHOR_KEY = "checklist.commentAuthor";
 
 /* ---------- Utilitaires ---------- */
 function el(tag, props = {}, ...children) {
@@ -104,6 +113,7 @@ async function showView() {
   if (!pendingIds.size && version === mutationVersion) {
     state.tasks = data.tasks;
     state.loadedAt = Date.now();
+    syncComments();
   }
   render();
 }
@@ -294,7 +304,7 @@ function upsertTask(task) {
 
 // Mise à jour optimiste : l'état et l'affichage changent tout de suite, la requête part
 // en arrière-plan ; en cas d'erreur, `rollback` restaure l'état précédent.
-async function optimistic(id, apply, request, rollback) {
+async function optimistic(id, apply, request, rollback, showError = (message) => ($("list-error").textContent = message)) {
   $("list-error").textContent = "";
   apply();
   mutationVersion++;
@@ -305,7 +315,7 @@ async function optimistic(id, apply, request, rollback) {
     if (saved?.id) upsertTask(saved);
   } catch (error) {
     rollback();
-    $("list-error").textContent = error.message;
+    showError(error.message);
   } finally {
     pendingIds.delete(id);
   }
@@ -362,7 +372,11 @@ function renderTasks(tasks, changedIds = null) {
     changedIds.forEach((id) => {
       const card = list.querySelector(`li[data-id="${CSS.escape(id)}"]`);
       const task = tasks.find((item) => item.id === id);
-      if (card && task) card.replaceWith(renderTask(task));
+      if (!card || !task) return;
+      const focusKey = card.contains(document.activeElement) ? document.activeElement.dataset.focus : null;
+      const next = renderTask(task);
+      card.replaceWith(next);
+      if (focusKey) next.querySelector(`[data-focus="${focusKey}"]`)?.focus();
     });
     return;
   }
@@ -437,7 +451,12 @@ function renderTask(task) {
   if (!task.cabCode && !siteHref) line1.append(el("span", { className: "cab untitled", textContent: "Sans code" }));
   if (done && task.description) line1.append(el("span", { className: "desc-inline", textContent: task.description, title: task.description }));
   const notesFlag = task.notes && el("span", { className: "notes-flag", textContent: "✎ Notes", title: "Cette tâche a des notes" });
-  if (done && notesFlag) line1.append(notesFlag);
+  const open = detail.openId === task.id;
+  const detailsToggle = el("button", {
+    type: "button", className: "details-toggle", textContent: `Détails (${task.commentCount ?? 0})`, ariaExpanded: String(open),
+  });
+  detailsToggle.addEventListener("click", () => toggleDetails(task.id));
+  if (done) line1.append(...[notesFlag, detailsToggle].filter(Boolean));
 
   const tags = el("span", { className: "tags" });
   if (done) {
@@ -452,7 +471,7 @@ function renderTask(task) {
   const body = el("div", { className: "body" }, line1);
   if (!done) {
     if (task.description) body.append(el("p", { className: "desc", textContent: task.description, title: task.description }));
-    body.append(el("div", { className: "meta" }, task.deadline && renderDue(task.deadline), renderAssignee(task.assignedTo), notesFlag));
+    body.append(el("div", { className: "meta" }, task.deadline && renderDue(task.deadline), renderAssignee(task.assignedTo), notesFlag, detailsToggle));
   }
 
   const btns = el("div", { className: "btns" });
@@ -475,7 +494,8 @@ function renderTask(task) {
     btns.append(status, edit, duplicate, remove);
   }
 
-  const card = el("li", { className: `task urg-${task.urgency}${done ? " done" : ""}${overdue ? " overdue" : ""}` }, checkbox, body, btns);
+  const card = el("li", { className: `task urg-${task.urgency}${done ? " done" : ""}${overdue ? " overdue" : ""}${open ? " open" : ""}` },
+    checkbox, body, btns, open && renderDetails(task));
   card.dataset.id = task.id;
   return card;
 }
@@ -496,9 +516,215 @@ function removeTask(task) {
   if (index === -1) return;
   const removed = state.tasks[index];
   optimistic(task.id,
-    () => state.tasks.splice(index, 1),
-    () => api(`/api/tasks/${task.id}`, { method: "DELETE" }),
+    () => {
+      state.tasks.splice(index, 1);
+      if (detail.openId === task.id) detail.openId = null;
+    },
+    async () => {
+      await api(`/api/tasks/${task.id}`, { method: "DELETE" });
+      detail.comments.delete(task.id);
+    },
     () => state.tasks.splice(Math.min(index, state.tasks.length), 0, removed));
+}
+
+/* ---------- Volet de détail : notes et commentaires ---------- */
+function toggleDetails(taskId) {
+  const previous = detail.openId;
+  detail.openId = previous === taskId ? null : taskId;
+  render([previous, taskId].filter(Boolean));
+  if (detail.openId && !detail.comments.has(taskId) && !detail.loading.has(taskId)) loadComments(taskId);
+}
+
+async function loadComments(taskId) {
+  detail.loading.add(taskId);
+  detail.errors.delete(taskId);
+  render([taskId]);
+  try {
+    const comments = await api(`/api/comments?taskId=${encodeURIComponent(taskId)}`);
+    detail.comments.set(taskId, comments);
+    const task = state.tasks.find((item) => item.id === taskId);
+    if (task) task.commentCount = comments.length;
+  } catch (error) {
+    detail.errors.set(taskId, error.message);
+  } finally {
+    detail.loading.delete(taskId);
+  }
+  render([taskId]);
+}
+
+// Après une actualisation : un fil dont le nombre de commentaires a changé ailleurs est rechargé.
+function syncComments() {
+  detail.comments.forEach((comments, taskId) => {
+    const task = state.tasks.find((item) => item.id === taskId);
+    if (!task) detail.comments.delete(taskId);
+    else if (!pendingIds.has(taskId) && task.commentCount !== comments.length) {
+      detail.comments.delete(taskId);
+      if (detail.openId === taskId) loadComments(taskId);
+    }
+  });
+  if (detail.openId && !state.tasks.some((task) => task.id === detail.openId)) detail.openId = null;
+}
+
+function rememberedAuthor() {
+  try {
+    return localStorage.getItem(AUTHOR_KEY) || "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberAuthor(name) {
+  try {
+    localStorage.setItem(AUTHOR_KEY, name);
+  } catch {
+    /* stockage indisponible : le choix ne sera simplement pas mémorisé */
+  }
+}
+
+// Texte brut avec les URL http(s) rendues cliquables (nœuds DOM, jamais d'innerHTML).
+function linkify(text) {
+  const nodes = [];
+  let last = 0;
+  for (const match of text.matchAll(/https?:\/\/[^\s<>"]+/g)) {
+    const url = match[0].replace(/[.,;:!?)\]}'»]+$/, "");
+    const href = safeUrl(url);
+    nodes.push(text.slice(last, match.index));
+    nodes.push(href ? el("a", { href, target: "_blank", rel: "noopener noreferrer", textContent: url }) : url);
+    last = match.index + url.length;
+  }
+  nodes.push(text.slice(last));
+  return nodes;
+}
+
+function relativeTime(iso) {
+  const minutes = Math.floor((Date.now() - Date.parse(iso)) / 60000);
+  if (minutes < 1) return "à l'instant";
+  if (minutes < 60) return `il y a ${minutes} min`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `il y a ${hours} h`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `il y a ${days} j`;
+  return new Date(iso).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric", timeZone: "Europe/Paris" });
+}
+
+function renderDetails(task) {
+  const panel = el("div", { className: "details-panel" });
+  if (task.notes) {
+    panel.append(
+      el("h3", { className: "panel-title", textContent: "Notes" }),
+      el("p", { className: "notes-text" }, ...linkify(task.notes)));
+  }
+
+  const comments = detail.comments.get(task.id);
+  panel.append(el("h3", { className: "panel-title", textContent: `Commentaires (${task.commentCount ?? 0})` }));
+  if (detail.loading.has(task.id)) {
+    panel.append(el("p", { className: "muted", textContent: "Chargement…" }));
+  } else if (comments) {
+    if (!comments.length) panel.append(el("p", { className: "muted", textContent: "Aucun commentaire." }));
+    else panel.append(el("ul", { className: "comments" }, ...comments.map((comment) => renderComment(task, comment))));
+  }
+  panel.append(el("p", { className: "error", textContent: detail.errors.get(task.id) || "" }));
+  if (comments) panel.append(renderComposer(task));
+  return panel;
+}
+
+function renderComment(task, comment) {
+  const head = el("div", { className: "comment-head" },
+    el("strong", { textContent: comment.author }),
+    el("span", {
+      className: "when", textContent: relativeTime(comment.createdAt),
+      title: new Date(comment.createdAt).toLocaleString("fr-FR", { dateStyle: "full", timeStyle: "short", timeZone: "Europe/Paris" }),
+    }));
+  if (!comment.pending) {
+    const remove = el("button", { type: "button", className: "comment-delete", textContent: "Supprimer" });
+    remove.addEventListener("click", () => deleteComment(task.id, comment));
+    head.append(remove);
+  }
+  return el("li", { className: `comment${comment.pending ? " pending" : ""}` },
+    head, el("p", { className: "comment-body", textContent: comment.body }));
+}
+
+function renderComposer(task) {
+  const names = devs.map((dev) => dev.name);
+  const author = el("select", { ariaLabel: "Auteur", disabled: !names.length });
+  author.dataset.focus = "author";
+  author.append(el("option", { value: "", textContent: names.length ? "— Auteur —" : "Aucun dev (voir Paramètres)" }));
+  names.forEach((name) => author.append(el("option", { value: name, textContent: name })));
+  const remembered = rememberedAuthor();
+  author.value = names.includes(remembered) ? remembered : "";
+
+  const text = el("textarea", {
+    rows: 2, maxLength: 2000, ariaLabel: "Commentaire", value: detail.drafts.get(task.id) || "",
+    placeholder: "Ajouter un commentaire… (Ctrl+Entrée pour envoyer)",
+  });
+  text.dataset.focus = "composer";
+  text.addEventListener("input", () => detail.drafts.set(task.id, text.value));
+  text.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+      event.preventDefault();
+      sendComment(task.id, author.value, text.value);
+    }
+  });
+
+  const form = el("form", { className: "comment-form" }, author, text,
+    el("button", { type: "submit", className: "btn small primary", textContent: "Envoyer", disabled: !names.length }));
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    sendComment(task.id, author.value, text.value);
+  });
+  return form;
+}
+
+function sendComment(taskId, author, value) {
+  const body = value.trim();
+  const task = state.tasks.find((item) => item.id === taskId);
+  const comments = detail.comments.get(taskId);
+  if (!body || !task || !comments) return;
+  if (!author) {
+    detail.errors.set(taskId, "Choisissez un auteur");
+    render([taskId]);
+    return;
+  }
+  rememberAuthor(author);
+  detail.errors.delete(taskId);
+  detail.drafts.delete(taskId);
+  const temp = { id: `tmp-${crypto.randomUUID()}`, taskId, author, body, createdAt: new Date().toISOString(), pending: true };
+  optimistic(taskId,
+    () => {
+      comments.push(temp);
+      task.commentCount = (task.commentCount ?? 0) + 1;
+    },
+    async () => {
+      const saved = await api("/api/comments", { method: "POST", body: JSON.stringify({ taskId, author, body }) });
+      comments.splice(comments.indexOf(temp), 1, saved);
+    },
+    () => {
+      const index = comments.indexOf(temp);
+      if (index !== -1) comments.splice(index, 1);
+      task.commentCount -= 1;
+      detail.drafts.set(taskId, value); // le texte n'est pas perdu
+    },
+    (message) => detail.errors.set(taskId, message));
+}
+
+function deleteComment(taskId, comment) {
+  if (!confirm("Supprimer ce commentaire ?")) return;
+  const task = state.tasks.find((item) => item.id === taskId);
+  const comments = detail.comments.get(taskId);
+  const index = comments?.indexOf(comment) ?? -1;
+  if (!task || index === -1) return;
+  detail.errors.delete(taskId);
+  optimistic(taskId,
+    () => {
+      comments.splice(index, 1);
+      task.commentCount -= 1;
+    },
+    () => api(`/api/comments?id=${encodeURIComponent(comment.id)}`, { method: "DELETE" }),
+    () => {
+      comments.splice(Math.min(index, comments.length), 0, comment);
+      task.commentCount += 1;
+    },
+    (message) => detail.errors.set(taskId, message));
 }
 
 /* ---------- Formulaire ---------- */
