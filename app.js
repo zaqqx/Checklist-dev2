@@ -593,8 +593,9 @@ document.querySelectorAll(".recap .stat").forEach((button) =>
 
 /* ---------- Filtres ---------- */
 // Filtres appliqués en mémoire : aucun appel réseau.
-["f-status", "f-assigned", "f-urgency", "f-due"].forEach((id) => $(id).addEventListener("change", render));
-$("f-search").addEventListener("input", render);
+// render() sans argument : l'événement ne doit pas être pris pour une liste de tâches modifiées.
+["f-status", "f-assigned", "f-urgency", "f-due"].forEach((id) => $(id).addEventListener("change", () => render()));
+$("f-search").addEventListener("input", () => render());
 $("reset").addEventListener("click", () => {
   ["f-search", "f-status", "f-assigned", "f-urgency", "f-due"].forEach((id) => ($(id).value = ""));
   render();
