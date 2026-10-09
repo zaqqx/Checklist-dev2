@@ -55,6 +55,9 @@ export default async function handler(req, res) {
     if (body.description !== undefined) {
       patch.description = typeof body.description === "string" ? body.description.trim().slice(0, 2000) || null : null;
     }
+    if (body.notes !== undefined) {
+      patch.notes = typeof body.notes === "string" ? body.notes.trim().slice(0, 5000) || null : null;
+    }
     if (body.urgency !== undefined) {
       if (!URGENCIES.has(body.urgency)) return res.status(400).json({ error: "Urgence invalide" });
       patch.urgency = body.urgency;

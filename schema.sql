@@ -1,5 +1,5 @@
 -- À exécuter dans Supabase → SQL Editor.
--- Si les tables existent déjà (ancien projet), seules les sections "INDEX", "TRIGGERS" et "POLICIES" sont nécessaires.
+-- Si les tables existent déjà (ancien projet), seules les sections "MIGRATIONS", "INDEX", "TRIGGERS" et "POLICIES" sont nécessaires.
 
 do $$ begin
   create type "Urgency" as enum ('BASSE', 'MOYENNE', 'HAUTE', 'CRITIQUE');
@@ -29,6 +29,9 @@ create table if not exists "Dev" (
   name text not null unique,
   "createdAt" timestamptz not null default now()
 );
+
+-- MIGRATIONS : colonnes ajoutées après la création des tables
+alter table "Task" add column if not exists notes text;
 
 -- INDEX : colonnes utilisées pour filtrer et trier les tâches
 create index if not exists "Task_status_idx" on "Task" (status);

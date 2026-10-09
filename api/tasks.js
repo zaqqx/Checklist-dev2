@@ -75,6 +75,7 @@ export default async function handler(req, res) {
       siteUrl: siteUrl || null,
       siteName: siteUrl ? siteNameFrom(siteUrl) : null,
       description: typeof body.description === "string" ? body.description.trim().slice(0, 2000) || null : null,
+      notes: typeof body.notes === "string" ? body.notes.trim().slice(0, 5000) || null : null,
       urgency: URGENCIES.has(body.urgency) ? body.urgency : "MOYENNE",
       deadline: body.deadline ? new Date(body.deadline).toISOString() : null,
       assignedTo: typeof body.assignedTo === "string" ? body.assignedTo || null : null,

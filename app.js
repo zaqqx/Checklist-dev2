@@ -436,6 +436,8 @@ function renderTask(task) {
   }
   if (!task.cabCode && !siteHref) line1.append(el("span", { className: "cab untitled", textContent: "Sans code" }));
   if (done && task.description) line1.append(el("span", { className: "desc-inline", textContent: task.description, title: task.description }));
+  const notesFlag = task.notes && el("span", { className: "notes-flag", textContent: "✎ Notes", title: "Cette tâche a des notes" });
+  if (done && notesFlag) line1.append(notesFlag);
 
   const tags = el("span", { className: "tags" });
   if (done) {
@@ -450,7 +452,7 @@ function renderTask(task) {
   const body = el("div", { className: "body" }, line1);
   if (!done) {
     if (task.description) body.append(el("p", { className: "desc", textContent: task.description, title: task.description }));
-    body.append(el("div", { className: "meta" }, task.deadline && renderDue(task.deadline), renderAssignee(task.assignedTo)));
+    body.append(el("div", { className: "meta" }, task.deadline && renderDue(task.deadline), renderAssignee(task.assignedTo), notesFlag));
   }
 
   const btns = el("div", { className: "btns" });
@@ -509,6 +511,7 @@ function openForm(task = null, duplicate = false) {
   $("t-cabLink").value = task?.cabLink ?? "";
   $("t-siteUrl").value = task?.siteUrl ?? "";
   $("t-description").value = task?.description ?? "";
+  $("t-notes").value = task?.notes ?? "";
   $("t-urgency").value = task?.urgency ?? "MOYENNE";
   $("t-deadline").value = task?.deadline && !duplicate ? task.deadline.slice(0, 10) : "";
   $("t-assignedTo").value = task?.assignedTo ?? "";
@@ -534,6 +537,7 @@ $("task-form").addEventListener("submit", async (event) => {
     cabLink: cabLink || null,
     siteUrl: siteUrl || null,
     description: $("t-description").value.trim() || null,
+    notes: $("t-notes").value.trim() || null,
     urgency: $("t-urgency").value,
     deadline: deadline ? new Date(deadline).toISOString() : null,
     assignedTo: $("t-assignedTo").value || null,
